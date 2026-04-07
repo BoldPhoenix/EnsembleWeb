@@ -30,7 +30,9 @@ import { NextRequest } from "next/server"
       )
 
       if (!response.ok) {
-        return new Response("ElevenLabs TTS failed", { status: 500 })
+        const errorText = await response.text()
+        console.error("ElevenLabs error:", response.status, errorText)
+        return new Response(`ElevenLabs TTS failed: ${response.status} ${errorText}`, { status: 500 })
       }
 
       return new Response(response.body, {
