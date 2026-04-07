@@ -118,22 +118,31 @@
         audioQueue.push(speakSentence(remaining))
       }
 
-     // Play audio in order
-        for (const audioPromise of audioQueue) {
-          const audio = await audioPromise
-          if (audio) {
-            await new Promise<void>(resolve => {
-              audio.onended = () => resolve()
-              audio.play()
-            })
-          }
-        }
-
+      // Save to DB immediately
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: aiMessage }),
       })
+
+      // Play audio in background — don't block UI
+      const queue = [...audioQueue]
+      ;(async () => {
+        for (const audioPromise of queue) {
+          try {
+            const audio = await audioPromise
+            if (audio) {
+              await new Promise<void>(resolve => {
+                audio.onended = () => resolve()
+                audio.onerror = () => resolve()
+                audio.play().catch(() => resolve())
+              })
+            }
+          } catch {
+            // skip failed audio
+          }
+        }
+      })()
       
     } catch (error) {
       console.error("Chat error:", error)
