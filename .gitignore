@@ -49,3 +49,5 @@ skills-lock.json
 .neon
 
 /app/generated/prisma
+
+.vercel
