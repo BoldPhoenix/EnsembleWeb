@@ -4,7 +4,7 @@
   import { useEffect } from "react"
 
   function Model() {
-    const { scene, animations } = useGLTF("/aimee2.glb")                                                                                                           
+    const { scene, animations } = useGLTF("/Aimee2.glb")                                                                                                           
     const { actions } = useAnimations(animations, scene)
     
     useEffect(() => {
