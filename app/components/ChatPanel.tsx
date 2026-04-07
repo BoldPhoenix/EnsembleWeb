@@ -1,12 +1,19 @@
 "use client"
 
-  import { useState, useEffect } from "react"
-  import MessageBubble from "./MessageBubble"
-  import ChatInput from "./ChatInput"
+ import { useState, useEffect, useRef } from "react"
+ import MessageBubble from "./MessageBubble"
+ import ChatInput from "./ChatInput"
+  
 
-  export default function ChatPanel() {
+    export default function ChatPanel() {
     const [messages, setMessages] = useState<{role: string, content: string}[]>([])
     const [sessionId, setSessionId] = useState<string | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages])
 
     useEffect(() => {
       async function createSession() {
@@ -18,11 +25,13 @@
     }, [])
 
     async function handleSend(message: string) {
-      if (!sessionId) return
+    if (!sessionId) return
+    setIsLoading(true)
 
-      const updated = [...messages, { role: "user", content: message }]
-      setMessages(updated)
+    const updated = [...messages, { role: "user", content: message }]
+    setMessages(updated)
 
+    try {
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -72,7 +81,16 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: aiMessage }),
       })
+    } catch (error) {
+      console.error("Chat error:", error)
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "Sorry, something went wrong. Please try again."
+      }])
+    } finally {
+      setIsLoading(false)
     }
+  }
 
     return (
       <div className="flex flex-col flex-1 p-4">
@@ -80,7 +98,13 @@
           {messages.map((msg, i) => (
             <MessageBubble key={i} role={msg.role} content={msg.content} />
           ))}
+          <div ref={messagesEndRef} />
         </div>
+        {isLoading && (
+          <div className="text-zinc-400 text-sm animate-pulse">
+          Thinking...
+          </div>
+        )}
         <ChatInput onSend={handleSend} />
       </div>
     )
