@@ -24,6 +24,30 @@
       createSession()
     }, [])
 
+    async function speakSentence(text: string) {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10000)
+
+      const ttsResponse = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+
+      if (ttsResponse.ok) {
+        const audioBlob = await ttsResponse.blob()
+        const audioUrl = URL.createObjectURL(audioBlob)
+        return new Audio(audioUrl)
+      }
+    } catch {
+      // fallback handled by caller
+    }
+    return null
+  }
+
     async function handleSend(message: string) {
     if (!sessionId) return
     setIsLoading(true)
@@ -49,6 +73,8 @@
       const reader = response.body.getReader()
       const decoder = new TextDecoder("utf-8", { fatal: false })
       let aiMessage = ""
+      let spokenText = ""
+      const audioQueue: Array<Promise<HTMLAudioElement | null>> = []
 
       setMessages([...updated, { role: "assistant", content: "" }])
 
@@ -69,6 +95,16 @@
             if (data.message?.content) {
               aiMessage += data.message.content
               setMessages([...updated, { role: "assistant", content: aiMessage }])
+
+              // Check for complete sentences to speak
+              const unspoken = aiMessage.slice(spokenText.length)
+              const sentenceMatch = unspoken.match(/[^.!?]*[.!?]\s*/g)
+              if (sentenceMatch) {
+                for (const sentence of sentenceMatch) {
+                  spokenText += sentence
+                  audioQueue.push(speakSentence(sentence.trim()))
+                }
+              }
             }
           } catch {
             // incomplete JSON, skip
@@ -76,41 +112,29 @@
         }
       }
 
+      // Speak any remaining text that didn't end with punctuation
+      const remaining = aiMessage.slice(spokenText.length).trim()
+      if (remaining) {
+        audioQueue.push(speakSentence(remaining))
+      }
+
+     // Play audio in order
+        for (const audioPromise of audioQueue) {
+          const audio = await audioPromise
+          if (audio) {
+            await new Promise<void>(resolve => {
+              audio.onended = () => resolve()
+              audio.play()
+            })
+          }
+        }
+
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: aiMessage }),
-
-      
       })
-      console.log("About to call TTS with:", aiMessage.substring(0, 50))
-       try {
-    const controller = new AbortController()                                                                                                                      
-    const timeout = setTimeout(() => controller.abort(), 10000)
-
-    const ttsResponse = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: aiMessage }),
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
-
-    if (ttsResponse.ok) {
-      const audioBlob = await ttsResponse.blob()
-      const audioUrl = URL.createObjectURL(audioBlob)
-      const audio = new Audio(audioUrl)
-      audio.play()
-    } else {
-      throw new Error("TTS failed")
-    }
-  } catch {
-    const utterance = new SpeechSynthesisUtterance(aiMessage)
-    utterance.lang = "en-GB"
-    utterance.rate = 1.0
-    window.speechSynthesis.speak(utterance)
-  }
-
+      
     } catch (error) {
       console.error("Chat error:", error)
       setMessages(prev => [...prev, {
