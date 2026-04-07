@@ -42,3 +42,10 @@ next-env.d.ts
 
 # claude code
 .claude/
+.agents/
+skills-lock.json
+
+# neon
+.neon
+
+/app/generated/prisma

@@ -1,15 +1,33 @@
 "use client"
 
-  import { useState } from "react"
+  import { useState, useEffect } from "react"
   import MessageBubble from "./MessageBubble"
   import ChatInput from "./ChatInput"
 
   export default function ChatPanel() {
     const [messages, setMessages] = useState<{role: string, content: string}[]>([])
+    const [sessionId, setSessionId] = useState<string | null>(null)
+
+    useEffect(() => {
+      async function createSession() {
+        const res = await fetch("/api/sessions", { method: "POST" })
+        const session = await res.json()
+        setSessionId(session.id)
+      }
+      createSession()
+    }, [])
 
     async function handleSend(message: string) {
+      if (!sessionId) return
+
       const updated = [...messages, { role: "user", content: message }]
       setMessages(updated)
+
+      await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "user", content: message }),
+      })
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -48,6 +66,12 @@
           }
         }
       }
+
+      await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "assistant", content: aiMessage }),
+      })
     }
 
     return (
