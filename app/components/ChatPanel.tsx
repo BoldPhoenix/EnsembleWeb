@@ -37,7 +37,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "user", content: message }),
       })
-
+      
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -45,7 +45,7 @@
       })
 
       if (!response.body) return
-
+      
       const reader = response.body.getReader()
       const decoder = new TextDecoder("utf-8", { fatal: false })
       let aiMessage = ""
@@ -80,7 +80,37 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: aiMessage }),
+
+      
       })
+      console.log("About to call TTS with:", aiMessage.substring(0, 50))
+       try {
+    const controller = new AbortController()                                                                                                                      
+    const timeout = setTimeout(() => controller.abort(), 10000)
+
+    const ttsResponse = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: aiMessage }),
+      signal: controller.signal,
+    })
+    clearTimeout(timeout)
+
+    if (ttsResponse.ok) {
+      const audioBlob = await ttsResponse.blob()
+      const audioUrl = URL.createObjectURL(audioBlob)
+      const audio = new Audio(audioUrl)
+      audio.play()
+    } else {
+      throw new Error("TTS failed")
+    }
+  } catch {
+    const utterance = new SpeechSynthesisUtterance(aiMessage)
+    utterance.lang = "en-GB"
+    utterance.rate = 1.0
+    window.speechSynthesis.speak(utterance)
+  }
+
     } catch (error) {
       console.error("Chat error:", error)
       setMessages(prev => [...prev, {
