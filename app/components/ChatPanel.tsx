@@ -102,7 +102,7 @@
               if (sentenceMatch) {
                 for (const sentence of sentenceMatch) {
                   spokenText += sentence
-                  audioQueue.push(speakSentence(sentence.trim()))
+                 // audioQueue.push(speakSentence(sentence.trim()))
                 }
               }
             }
