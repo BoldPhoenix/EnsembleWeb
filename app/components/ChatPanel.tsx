@@ -126,6 +126,7 @@ import { audioState } from "../lib/audioState"
       })
 
       // Play audio in background — don't block UI
+      // Mute mic while speaking to prevent feedback
       const queue = [...audioQueue]
       ;(async () => {
     for (const audioPromise of queue) {
@@ -139,7 +140,7 @@ import { audioState } from "../lib/audioState"
           source.connect(analyser)
           analyser.connect(audioContext.destination)
           const dataArray = new Uint8Array(analyser.frequencyBinCount)
-          
+
           await audioContext.resume()
           audio.play()
 
