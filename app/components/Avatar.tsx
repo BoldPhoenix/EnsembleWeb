@@ -3,6 +3,7 @@ import { Canvas, useFrame } from "@react-three/fiber"
 import { OrbitControls, useGLTF, useAnimations } from "@react-three/drei"
 import { useEffect, useRef } from "react"
 import { audioState } from "../lib/audioState"
+import * as THREE from "three"
 
 function Model() {
     const { scene, animations } = useGLTF("/Aimee.glb")
@@ -10,6 +11,15 @@ function Model() {
     const mouthMeshes = useRef<any[]>([])
 
     useEffect(() => {
+    // Fix double-sided rendering
+    scene.traverse((child: any) => {                                                                                                                                if (child.isMesh && child.material) {
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m: any) => { m.side = THREE.DoubleSide })
+        } else {
+          child.material.side = THREE.DoubleSide
+        }
+      }
+    })
       if (actions && Object.keys(actions).length > 0) {
         const idle = actions["idle"] || actions[Object.keys(actions)[0]]
         idle?.play()
