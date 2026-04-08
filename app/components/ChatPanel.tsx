@@ -1,9 +1,9 @@
 "use client"
 
- import { useState, useEffect, useRef } from "react"
- import MessageBubble from "./MessageBubble"
- import ChatInput from "./ChatInput"
-  
+import { useState, useEffect, useRef } from "react"
+import MessageBubble from "./MessageBubble"
+import ChatInput from "./ChatInput"
+import { audioState } from "../lib/audioState"
 
     export default function ChatPanel() {
     const [messages, setMessages] = useState<{role: string, content: string}[]>([])
@@ -102,7 +102,7 @@
               if (sentenceMatch) {
                 for (const sentence of sentenceMatch) {
                   spokenText += sentence
-                 // audioQueue.push(speakSentence(sentence.trim()))
+                 audioQueue.push(speakSentence(sentence.trim()))
                 }
               }
             }
@@ -128,21 +128,50 @@
       // Play audio in background — don't block UI
       const queue = [...audioQueue]
       ;(async () => {
-        for (const audioPromise of queue) {
-          try {
-            const audio = await audioPromise
-            if (audio) {
-              await new Promise<void>(resolve => {
-                audio.onended = () => resolve()
-                audio.onerror = () => resolve()
-                audio.play().catch(() => resolve())
-              })
+    for (const audioPromise of queue) {
+      try {
+        const audio = await audioPromise
+        if (audio) {
+          const audioContext = new AudioContext()
+          const source = audioContext.createMediaElementSource(audio)
+          const analyser = audioContext.createAnalyser()
+          analyser.fftSize = 256
+          source.connect(analyser)
+          analyser.connect(audioContext.destination)
+          const dataArray = new Uint8Array(analyser.frequencyBinCount)
+          
+          await audioContext.resume()
+          audio.play()
+
+          const updateVolume = () => {
+            if (!audio.paused) {
+              analyser.getByteFrequencyData(dataArray)
+              const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+              audioState.volume = Math.min(avg / 80, 1)
+              requestAnimationFrame(updateVolume)
+            } else {
+              audioState.volume = 0
             }
-          } catch {
-            // skip failed audio
           }
+          updateVolume()
+
+          await new Promise<void>(resolve => {
+            audio.onended = () => {
+              audioState.volume = 0
+              audioContext.close()
+              resolve()
+            }
+            audio.onerror = () => {
+              audioState.volume = 0
+              resolve()
+            }
+          })
         }
-      })()
+      } catch {
+        audioState.volume = 0
+      }
+    }
+  })()
       
     } catch (error) {
       console.error("Chat error:", error)

@@ -1,0 +1,1 @@
+export const audioState = { volume: 0 }

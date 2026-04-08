@@ -1,19 +1,33 @@
 "use client"                                                                                                                                                
-  import { Canvas } from "@react-three/fiber"
-  import { OrbitControls, useGLTF, useAnimations } from "@react-three/drei"
-  import { useEffect } from "react"
+import { Canvas, useFrame } from "@react-three/fiber"
+import { OrbitControls, useGLTF, useAnimations } from "@react-three/drei"
+import { useEffect, useRef } from "react"
+import { audioState } from "../lib/audioState"
 
-  function Model() {
-    const { scene, animations } = useGLTF("/Aimee2.glb")                                                                                                           
+function Model() {
+    const { scene, animations } = useGLTF("/Aimee.glb")
     const { actions } = useAnimations(animations, scene)
-    
+    const mouthMeshes = useRef<any[]>([])
+
     useEffect(() => {
       if (actions && Object.keys(actions).length > 0) {
         const idle = actions["idle"] || actions[Object.keys(actions)[0]]
         idle?.play()
       }
-    }, [actions])
 
+      scene.traverse((child: any) => {
+    if (child.morphTargetDictionary && child.morphTargetDictionary["Mouth_Open"] !== undefined) {
+      mouthMeshes.current.push(child)
+    }
+  })
+    }, [actions, scene])
+
+    useFrame(() => {
+    for (const mesh of mouthMeshes.current) {
+      const index = mesh.morphTargetDictionary["Mouth_Open"]
+      mesh.morphTargetInfluences[index] = audioState.volume
+    }
+  })
     return <primitive object={scene} position={[0, -1, 0]} />
   }
 
