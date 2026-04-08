@@ -12,14 +12,20 @@ function Model() {
 
     useEffect(() => {
     // Fix double-sided rendering
-    scene.traverse((child: any) => {                                                                                                                                if (child.isMesh && child.material) {
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m: any) => { m.side = THREE.DoubleSide })
-        } else {
-          child.material.side = THREE.DoubleSide
-        }
-      }
-    })
+    scene.traverse((child: any) => {
+    if (child.isMesh && child.material) {
+      // Create a black backface material
+      const backMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        side: THREE.BackSide,
+      })
+
+      // Clone the mesh and add it with the backface material
+      const backMesh = child.clone()
+      backMesh.material = backMat
+      child.parent?.add(backMesh)
+    }
+  })
       if (actions && Object.keys(actions).length > 0) {
         const idle = actions["idle"] || actions[Object.keys(actions)[0]]
         idle?.play()
