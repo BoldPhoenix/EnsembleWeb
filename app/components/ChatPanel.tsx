@@ -95,13 +95,26 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
         body: JSON.stringify({ role: "user", content: message, personality: currentPersonality }),
       })
 
-      // Tag conversation history with personality names for context
-      const taggedMessages = updated.map(m => ({
-        role: m.role,
-        content: m.role === "assistant" && m.personality && m.personality !== currentPersonality
-          ? `[${personalities[m.personality]?.name || m.personality}]: ${m.content}`
-          : m.content,
-      }))
+      // Tag conversation history — label ALL messages from other personalities
+      const taggedMessages = updated.map(m => {
+        if (m.role === "assistant" && m.personality && m.personality !== currentPersonality) {
+          return { role: "assistant" as const, content: `[${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
+        }
+        // Re-tag user messages that were directed at another personality
+        if (m.role === "user" && m.personality && m.personality !== currentPersonality) {
+          return { role: "user" as const, content: `[said to ${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
+        }
+        return { role: m.role, content: m.content }
+      })
+
+      // Inject a switch notice if this session has messages from another personality
+      const hasOtherPersonality = updated.some(m => m.personality && m.personality !== currentPersonality)
+      if (hasOtherPersonality) {
+        taggedMessages.splice(-1, 0, {
+          role: "user" as const,
+          content: `[The user has switched to talking to you, ${p.name}. Previous messages from other personalities are labeled with their names. You are ${p.name} — respond in your own voice, not theirs.]`,
+        })
+      }
 
       const response = await fetch("/api/chat", {
         method: "POST",
