@@ -5,6 +5,7 @@ import { buildMemoryContext } from "../../lib/memory"
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://192.168.86.126:11434"
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 
 const DEFAULT_PROMPT = "You are a helpful assistant. Keep responses brief and conversational."
 
@@ -25,14 +26,61 @@ export async function POST(req: NextRequest) {
     ? `${basePrompt}\n\n${memoryContext}`
     : basePrompt
 
+  // Priority: OpenRouter > Gemini > Ollama
+  if (OPENROUTER_API_KEY) {
+    return handleOpenRouter(messages, fullPrompt, image)
+  }
   if (GEMINI_API_KEY) {
     return handleGemini(messages, fullPrompt, image)
   }
   return handleOllama(messages, fullPrompt, image)
 }
 
+async function handleOpenRouter(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
+  const orMessages: any[] = [
+    { role: "system", content: systemPrompt },
+    ...messages.map((m: any, i: number) => {
+      if (image && i === messages.length - 1 && m.role === "user") {
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: m.content },
+            { type: "image_url", image_url: { url: `data:image/png;base64,${image}` } },
+          ],
+        }
+      }
+      return m
+    }),
+  ]
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "google/gemma-4-31b-it:free",
+      messages: orMessages,
+    }),
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error("OpenRouter error:", response.status, errorText)
+    return new Response(`OpenRouter error: ${response.status}`, { status: 500 })
+  }
+
+  const data = await response.json()
+  const text = data.choices?.[0]?.message?.content || ""
+
+  const ollamaFormat = JSON.stringify({ message: { content: text } }) + "\n"
+  return new Response(ollamaFormat, {
+    headers: { "Content-Type": "text/event-stream" },
+  })
+}
+
 async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
-  // For Ollama, images go in the last user message
   const ollamaMessages = [
     { role: "system", content: systemPrompt },
     ...messages.map((m: any, i: number) => {
@@ -62,13 +110,9 @@ async function handleOllama(messages: {role: string, content: string}[], systemP
 async function handleGemini(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
   const contents = messages.map((m: any, i: number) => {
     const parts: any[] = [{ text: m.content }]
-    // Add image to the last user message
     if (image && i === messages.length - 1 && m.role === "user") {
       parts.push({
-        inline_data: {
-          mime_type: "image/png",
-          data: image,
-        },
+        inline_data: { mime_type: "image/png", data: image },
       })
     }
     return {
@@ -84,9 +128,7 @@ async function handleGemini(messages: {role: string, content: string}[], systemP
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents,
-        systemInstruction: {
-          parts: [{ text: systemPrompt }],
-        },
+        systemInstruction: { parts: [{ text: systemPrompt }] },
       }),
     }
   )
