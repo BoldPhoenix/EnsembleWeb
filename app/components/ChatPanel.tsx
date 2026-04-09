@@ -318,6 +318,85 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
     }
   }
 
+  async function handleSendImage(message: string, imageBase64: string) {
+    if (!sessionId) return
+    setIsLoading(true)
+
+    const currentPersonality = localStorage.getItem("tinman-personality") || defaultPersonality
+    setPersonality(currentPersonality)
+    const p = personalities[currentPersonality]
+
+    const updated = [...messages, { role: "user" as const, content: message }]
+    setMessages(updated)
+
+    try {
+      // Save user message
+      await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "user", content: message, personality: currentPersonality }),
+      })
+
+      // Send to vision API
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: updated,
+          systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined),
+          image: imageBase64,
+        }),
+      })
+
+      if (!response.body) return
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder("utf-8", { fatal: false })
+      let aiMessage = ""
+
+      setMessages([...updated, { role: "assistant", content: "" }])
+
+      let buffer = ""
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const data = JSON.parse(line)
+            if (data.message?.content) {
+              aiMessage += data.message.content
+              setMessages([...updated, { role: "assistant", content: aiMessage }])
+            }
+          } catch {}
+        }
+      }
+
+      // Save assistant response
+      const savedMsg = await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
+      }).then(r => r.json())
+
+      // Extract topics
+      fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userMessage: message, assistantMessage: aiMessage, messageId: savedMsg.id }),
+      }).catch(() => {})
+
+    } catch (error) {
+      console.error("Image chat error:", error)
+      setMessages(prev => [...prev, { role: "assistant", content: "Sorry, something went wrong analyzing the image." }])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
     return (
       <div className="flex flex-col flex-1 p-4 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-y-auto space-y-2">
@@ -331,7 +410,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
           Thinking...
           </div>
         )}
-        <ChatInput onSend={handleSend} />
+        <ChatInput onSend={handleSend} onSendImage={handleSendImage} />
       </div>
     )
   }

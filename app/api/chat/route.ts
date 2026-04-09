@@ -9,7 +9,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const DEFAULT_PROMPT = "You are a helpful assistant. Keep responses brief and conversational."
 
 export async function POST(req: NextRequest) {
-  const { messages, systemPrompt } = await req.json()
+  const { messages, systemPrompt, image } = await req.json()
   const basePrompt = systemPrompt || DEFAULT_PROMPT
 
   // Build memory context from the latest user message
@@ -21,27 +21,34 @@ export async function POST(req: NextRequest) {
     // Memory is best-effort
   }
 
-  // Combine personality prompt with memory
   const fullPrompt = memoryContext
     ? `${basePrompt}\n\n${memoryContext}`
     : basePrompt
 
   if (GEMINI_API_KEY) {
-    return handleGemini(messages, fullPrompt)
+    return handleGemini(messages, fullPrompt, image)
   }
-  return handleOllama(messages, fullPrompt)
+  return handleOllama(messages, fullPrompt, image)
 }
 
-async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string) {
+async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
+  // For Ollama, images go in the last user message
+  const ollamaMessages = [
+    { role: "system", content: systemPrompt },
+    ...messages.map((m: any, i: number) => {
+      if (image && i === messages.length - 1 && m.role === "user") {
+        return { ...m, images: [image] }
+      }
+      return m
+    }),
+  ]
+
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "gemma4:31b-cloud",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages
-      ],
+      messages: ollamaMessages,
       stream: true,
       think: false,
     }),
@@ -52,17 +59,31 @@ async function handleOllama(messages: {role: string, content: string}[], systemP
   })
 }
 
-async function handleGemini(messages: {role: string, content: string}[], systemPrompt: string) {
+async function handleGemini(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
+  const contents = messages.map((m: any, i: number) => {
+    const parts: any[] = [{ text: m.content }]
+    // Add image to the last user message
+    if (image && i === messages.length - 1 && m.role === "user") {
+      parts.push({
+        inline_data: {
+          mime_type: "image/png",
+          data: image,
+        },
+      })
+    }
+    return {
+      role: m.role === "assistant" ? "model" : "user",
+      parts,
+    }
+  })
+
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: messages.map(m => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        })),
+        contents,
         systemInstruction: {
           parts: [{ text: systemPrompt }],
         },

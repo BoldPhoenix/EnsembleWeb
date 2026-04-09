@@ -3,7 +3,12 @@
 import { useState, useRef } from "react"
 import VoiceButton from "./VoiceButton"
 
-export default function ChatInput({ onSend }: { onSend: (message: string) => void }) {
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+export default function ChatInput({ onSend, onSendImage }: {
+  onSend: (message: string) => void
+  onSendImage?: (message: string, imageBase64: string) => void
+}) {
   const [message, setMessage] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -14,20 +19,32 @@ export default function ChatInput({ onSend }: { onSend: (message: string) => voi
   }
 
   function handleFile(file: File) {
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const content = e.target?.result as string
-      if (content) {
-        const prefix = `[File: ${file.name}]\n\`\`\`\n`
-        const suffix = `\n\`\`\``
-        // Truncate large files
-        const truncated = content.length > 10000
-          ? content.slice(0, 10000) + "\n... (truncated)"
-          : content
-        onSend(`${prefix}${truncated}${suffix}`)
+    if (IMAGE_TYPES.includes(file.type) && onSendImage) {
+      // Read image as base64
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string
+        // Strip the data:image/xxx;base64, prefix
+        const base64 = dataUrl.split(",")[1]
+        onSendImage(`[Image: ${file.name}]`, base64)
       }
+      reader.readAsDataURL(file)
+    } else {
+      // Read as text
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const content = e.target?.result as string
+        if (content) {
+          const prefix = `[File: ${file.name}]\n\`\`\`\n`
+          const suffix = `\n\`\`\``
+          const truncated = content.length > 10000
+            ? content.slice(0, 10000) + "\n... (truncated)"
+            : content
+          onSend(`${prefix}${truncated}${suffix}`)
+        }
+      }
+      reader.readAsText(file)
     }
-    reader.readAsText(file)
   }
 
   function handlePaste(e: React.ClipboardEvent) {
@@ -40,7 +57,6 @@ export default function ChatInput({ onSend }: { onSend: (message: string) => voi
         return
       }
     }
-    // Let normal text paste through
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -73,6 +89,7 @@ export default function ChatInput({ onSend }: { onSend: (message: string) => voi
         ref={fileInputRef}
         type="file"
         className="hidden"
+        accept="*/*"
         onChange={(e) => {
           const file = e.target.files?.[0]
           if (file) handleFile(file)
