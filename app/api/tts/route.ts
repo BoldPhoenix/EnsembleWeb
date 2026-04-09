@@ -9,6 +9,10 @@ import { NextRequest } from "next/server"
     if (ELEVENLABS_API_KEY) {
       return handleElevenLabs(text, voiceCloud)
     }
+    // On Vercel (no local network), skip TTS entirely
+    if (process.env.VERCEL) {
+      return new Response("No TTS provider on cloud", { status: 503 })
+    }
     return handleChatterbox(text, voiceLocal)
   }
 
