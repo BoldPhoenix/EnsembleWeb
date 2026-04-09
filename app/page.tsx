@@ -5,11 +5,11 @@ import Header from "./components/Header"
         <Header />
         <div className="flex flex-1 flex-col items-center justify-center gap-6">
           <h1 className="text-5xl font-bold text-white">
-            Meet Aim-E
+            Meet Aimee & Arthur
           </h1>
           <p className="text-lg text-zinc-400 max-w-md text-center">
-            An AI assistant with a personality, a face, and a voice.
-            Built with Next.js, React, and Three.js.
+            Two AI personalities with their own voices, faces, and opinions about each other.
+            Built with Next.js, React, Three.js, and too much caffeine.
           </p>
           <Link
             href="/chat"
