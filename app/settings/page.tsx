@@ -6,17 +6,35 @@ import { personalities, defaultPersonality } from "../lib/personalities"
 
 export default function Settings() {
   const [activePersonality, setActivePersonality] = useState(defaultPersonality)
+  const [descriptions, setDescriptions] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const saved = localStorage.getItem("tinman-personality")
     if (saved && personalities[saved]) {
       setActivePersonality(saved)
     }
+
+    // Load saved descriptions
+    const savedDescs: Record<string, string> = {}
+    for (const id of Object.keys(personalities)) {
+      const desc = localStorage.getItem(`tinman-desc-${id}`)
+      if (desc) savedDescs[id] = desc
+    }
+    setDescriptions(savedDescs)
   }, [])
 
   function selectPersonality(id: string) {
     setActivePersonality(id)
     localStorage.setItem("tinman-personality", id)
+  }
+
+  function updateDescription(id: string, value: string) {
+    setDescriptions(prev => ({ ...prev, [id]: value }))
+    if (value.trim()) {
+      localStorage.setItem(`tinman-desc-${id}`, value)
+    } else {
+      localStorage.removeItem(`tinman-desc-${id}`)
+    }
   }
 
   function newChat() {
@@ -46,13 +64,30 @@ export default function Settings() {
                 >
                   <div className="text-lg font-bold">{p.name}</div>
                   <div className="text-sm mt-2 opacity-80">
-                    {p.id === "aimee"
-                      ? "Laid-back British gal with a leather jacket and sharp wit"
-                      : "Proper British gentleman in a tweed vest with dry humor"}
+                    {p.defaultDescription.split(".")[0]}.
                   </div>
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <h2 className="text-xl font-semibold text-white mb-2">
+              {personalities[activePersonality].name}&apos;s Personality
+            </h2>
+            <p className="text-zinc-500 text-sm mb-3">
+              Customize the personality description. Leave blank to use the default.
+            </p>
+            <textarea
+              value={descriptions[activePersonality] || ""}
+              onChange={(e) => updateDescription(activePersonality, e.target.value)}
+              placeholder={personalities[activePersonality].defaultDescription}
+              rows={4}
+              className="w-full rounded bg-zinc-800 p-3 text-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-zinc-600 text-xs mt-1">
+              Base prompt (always active): {personalities[activePersonality].basePrompt}
+            </p>
           </div>
 
           <div>
@@ -64,17 +99,8 @@ export default function Settings() {
               Start New Chat
             </button>
             <p className="text-zinc-500 text-sm mt-2">
-              Clears the current conversation and starts fresh.
+              Clears the current conversation and starts fresh. Previous chats are saved.
             </p>
-          </div>
-
-          <div>
-            <h2 className="text-xl font-semibold text-white mb-4">Current Personality</h2>
-            <div className="bg-zinc-800 rounded p-4">
-              <p className="text-zinc-300 text-sm italic">
-                &quot;{personalities[activePersonality].systemPrompt}&quot;
-              </p>
-            </div>
           </div>
         </div>
       </div>

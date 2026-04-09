@@ -1,6 +1,7 @@
 export const maxDuration = 30
 
 import { NextRequest } from "next/server"
+import { buildMemoryContext } from "../../lib/memory"
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://192.168.86.126:11434"
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
@@ -9,12 +10,26 @@ const DEFAULT_PROMPT = "You are a helpful assistant. Keep responses brief and co
 
 export async function POST(req: NextRequest) {
   const { messages, systemPrompt } = await req.json()
-  const prompt = systemPrompt || DEFAULT_PROMPT
+  const basePrompt = systemPrompt || DEFAULT_PROMPT
+
+  // Build memory context from the latest user message
+  const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")
+  let memoryContext = ""
+  try {
+    memoryContext = await buildMemoryContext(lastUserMsg?.content || "")
+  } catch {
+    // Memory is best-effort
+  }
+
+  // Combine personality prompt with memory
+  const fullPrompt = memoryContext
+    ? `${basePrompt}\n\n${memoryContext}`
+    : basePrompt
 
   if (GEMINI_API_KEY) {
-    return handleGemini(messages, prompt)
+    return handleGemini(messages, fullPrompt)
   }
-  return handleOllama(messages, prompt)
+  return handleOllama(messages, fullPrompt)
 }
 
 async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string) {

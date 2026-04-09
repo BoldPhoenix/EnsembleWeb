@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import MessageBubble from "./MessageBubble"
 import ChatInput from "./ChatInput"
 import { audioState } from "../lib/audioState"
-import { personalities, defaultPersonality } from "../lib/personalities"
+import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/personalities"
 
     export default function ChatPanel() {
     const [messages, setMessages] = useState<{role: string, content: string, personality?: string}[]>([])
@@ -105,7 +105,7 @@ import { personalities, defaultPersonality } from "../lib/personalities"
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: taggedMessages, systemPrompt: p.systemPrompt }),
+        body: JSON.stringify({ messages: taggedMessages, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined) }),
       })
 
       if (!response.body) return
@@ -158,11 +158,22 @@ import { personalities, defaultPersonality } from "../lib/personalities"
       if (remaining) sentences.push(remaining)
 
       // Save to DB immediately
-      await fetch(`/api/sessions/${sessionId}/messages`, {
+      const savedMsg = await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
-      })
+      }).then(r => r.json())
+
+      // Extract topics in background — don't block UI
+      fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userMessage: message,
+          assistantMessage: aiMessage,
+          messageId: savedMsg.id,
+        }),
+      }).catch(() => {})
 
       // Play audio sequentially — one TTS request at a time
       ;(async () => {
