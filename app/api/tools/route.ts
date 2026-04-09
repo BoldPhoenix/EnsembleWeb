@@ -1,5 +1,17 @@
 import { NextRequest } from "next/server"
 
+// Helper to fetch with a strict timeout
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal })
+    return response
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function POST(req: NextRequest) {
   const { tool, args } = await req.json()
 
@@ -21,9 +33,8 @@ async function handleWebSearch(query: string) {
   if (!query) return Response.json({ result: "Search query is required" })
 
   try {
-    // Use DuckDuckGo HTML search (no API key needed, privacy-friendly)
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
@@ -31,7 +42,6 @@ async function handleWebSearch(query: string) {
 
     const html = await response.text()
 
-    // Extract search results from DDG HTML
     const results: string[] = []
     const resultPattern = /<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([^<]+)<\/a>/g
     const snippetPattern = /<a class="result__snippet"[^>]*>([^<]+)<\/a>/g
@@ -70,12 +80,10 @@ async function handleWebSearch(query: string) {
 async function handleWebFetch(url: string) {
   if (!url) return Response.json({ result: "URL is required" })
 
-  // Try Jina Reader first — converts any page to clean markdown
+  // Try Jina Reader first
   try {
-    const jinaResponse = await fetch(`https://r.jina.ai/${url}`, {
-      headers: {
-        "Accept": "text/markdown",
-      },
+    const jinaResponse = await fetchWithTimeout(`https://r.jina.ai/${url}`, {
+      headers: { "Accept": "text/markdown" },
     })
 
     if (jinaResponse.ok) {
@@ -83,17 +91,15 @@ async function handleWebFetch(url: string) {
       if (text.length > 30000) {
         text = text.slice(0, 30000) + "\n\n[... content truncated at 30KB]"
       }
-      return Response.json({
-        result: `Content from ${url}:\n\n${text}`,
-      })
+      return Response.json({ result: `Content from ${url}:\n\n${text}` })
     }
   } catch {
-    // Jina failed, fall back to raw fetch
+    // Jina failed, fall back
   }
 
-  // Fallback: raw HTML fetch with tag stripping
+  // Fallback: raw HTML fetch
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       },
@@ -106,12 +112,8 @@ async function handleWebFetch(url: string) {
       .replace(/<style[\s\S]*?<\/style>/gi, "")
       .replace(/<\/?(p|div|br|h[1-6]|li|tr)[^>]*>/gi, "\n")
       .replace(/<[^>]+>/g, "")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
       .replace(/\n\s*\n\s*\n/g, "\n\n")
       .trim()
 
@@ -119,9 +121,7 @@ async function handleWebFetch(url: string) {
       text = text.slice(0, 30000) + "\n\n[... content truncated at 30KB]"
     }
 
-    return Response.json({
-      result: `Content from ${url}:\n\n${text}`,
-    })
+    return Response.json({ result: `Content from ${url}:\n\n${text}` })
   } catch (error) {
     return Response.json({ result: `Failed to fetch ${url}: ${error}` })
   }
@@ -131,41 +131,31 @@ async function handleYouTubeTranscript(url: string) {
   if (!url) return Response.json({ result: "YouTube URL is required" })
 
   try {
-    // Extract video ID from various YouTube URL formats
     const videoId = url.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)?.[1]
     if (!videoId) return Response.json({ result: "Could not extract video ID from URL" })
 
-    // Use youtube transcript API (invidious instance for transcript access)
-    const instances = [
-      `https://inv.nadeko.net/api/v1/videos/${videoId}`,
-      `https://invidious.nerdvpn.de/api/v1/videos/${videoId}`,
-    ]
+    // Single Invidious instance with strict timeout
+    try {
+      const response = await fetchWithTimeout(
+        `https://inv.nadeko.net/api/v1/videos/${videoId}`,
+        {},
+        8000
+      )
 
-    for (const apiUrl of instances) {
-      try {
-        const response = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) })
-        if (!response.ok) continue
-
+      if (response.ok) {
         const data = await response.json()
         const title = data.title || "Unknown"
         const author = data.author || "Unknown"
         const description = data.description || ""
-        const lengthSeconds = data.lengthSeconds || 0
-        const minutes = Math.floor(lengthSeconds / 60)
+        const minutes = Math.floor((data.lengthSeconds || 0) / 60)
 
-        // Try to get captions
         let transcript = ""
         if (data.captions?.length > 0) {
-          const captionUrl = data.captions[0].url
           try {
-            const captionRes = await fetch(captionUrl, { signal: AbortSignal.timeout(10000) })
+            const captionRes = await fetchWithTimeout(data.captions[0].url, {}, 5000)
             if (captionRes.ok) {
               const captionText = await captionRes.text()
-              // Strip XML tags from caption data
-              transcript = captionText
-                .replace(/<[^>]+>/g, " ")
-                .replace(/\s+/g, " ")
-                .trim()
+              transcript = captionText.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
             }
           } catch {}
         }
@@ -174,24 +164,21 @@ async function handleYouTubeTranscript(url: string) {
         if (transcript) {
           result += `\n\nTranscript:\n${transcript.slice(0, 15000)}`
         }
-
         return Response.json({ result })
-      } catch {
-        continue
       }
-    }
+    } catch {}
 
-    // Fallback to Jina Reader
-    const jinaResponse = await fetch(`https://r.jina.ai/${url}`, {
-      headers: { "Accept": "text/markdown" },
-      signal: AbortSignal.timeout(10000),
-    })
-    if (jinaResponse.ok) {
-      const text = await jinaResponse.text()
-      return Response.json({ result: text.slice(0, 15000) })
-    }
+    // Fallback: just fetch the page via Jina
+    try {
+      const jinaRes = await fetchWithTimeout(`https://r.jina.ai/${url}`, {
+        headers: { "Accept": "text/markdown" },
+      })
+      if (jinaRes.ok) {
+        return Response.json({ result: (await jinaRes.text()).slice(0, 15000) })
+      }
+    } catch {}
 
-    return Response.json({ result: "Could not access YouTube video transcript. Try providing the URL to web_fetch instead." })
+    return Response.json({ result: "Could not access YouTube video. Try web_fetch instead." })
   } catch (error) {
     return Response.json({ result: `YouTube transcript failed: ${error}` })
   }
@@ -201,13 +188,9 @@ async function handleRedditRead(url: string) {
   if (!url) return Response.json({ result: "Reddit URL is required" })
 
   try {
-    // Reddit has a JSON API — just append .json to any URL
     const jsonUrl = url.replace(/\/$/, "") + ".json"
-    const response = await fetch(jsonUrl, {
-      headers: {
-        "User-Agent": "TinManWeb/1.0",
-      },
-      signal: AbortSignal.timeout(10000),
+    const response = await fetchWithTimeout(jsonUrl, {
+      headers: { "User-Agent": "TinManWeb/1.0" },
     })
 
     if (!response.ok) {
@@ -215,8 +198,6 @@ async function handleRedditRead(url: string) {
     }
 
     const data = await response.json()
-
-    // Parse post data
     const post = data[0]?.data?.children?.[0]?.data
     if (!post) return Response.json({ result: "Could not parse Reddit post data" })
 
@@ -227,11 +208,10 @@ async function handleRedditRead(url: string) {
     if (post.selftext) {
       result += `Post:\n${post.selftext.slice(0, 5000)}\n\n`
     }
-    if (post.url && post.url !== post.permalink) {
+    if (post.url && !post.url.includes(post.permalink)) {
       result += `Link: ${post.url}\n\n`
     }
 
-    // Parse top comments
     const comments = data[1]?.data?.children || []
     if (comments.length > 0) {
       result += "Top Comments:\n"
