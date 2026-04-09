@@ -47,7 +47,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
       initSession()
     }, [])
 
-    async function speakSentence(text: string, voiceId?: string) {
+    async function speakSentence(text: string, voiceLocal?: string, voiceCloud?: string) {
     // Skip empty or too-short text
     const cleaned = text.replace(/\./g, '').replace(/\s/g, '').trim()
     if (cleaned.length < 2) return null
@@ -59,7 +59,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
       const ttsResponse = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voiceId }),
+        body: JSON.stringify({ text, voiceLocal, voiceCloud }),
         signal: controller.signal,
       })
       clearTimeout(timeout)
@@ -179,6 +179,14 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
           body: JSON.stringify({ tool: toolName, args: toolArgs }),
         }).then(r => r.json())
 
+        // Save tool result to DB so other personalities can see it
+        const truncatedResult = toolResult.result?.slice(0, 5000) || ""
+        await fetch(`/api/sessions/${sessionId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "user", content: `[Tool: ${toolName}] ${truncatedResult}`, personality: "system" }),
+        })
+
         // Feed result back to LLM for final response
         const followUp = [
           ...updated,
@@ -253,13 +261,13 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
 
     // Pre-fetch next sentence while current one plays
     let nextAudioPromise: Promise<HTMLAudioElement | null> | null =
-      sentences.length > 0 ? speakSentence(sentences[0], p.voiceId) : null
+      sentences.length > 0 ? speakSentence(sentences[0], p.voiceLocal, p.voiceCloud) : null
 
     for (let i = 0; i < sentences.length; i++) {
       try {
         const audio = await nextAudioPromise
         // Start fetching the NEXT sentence immediately
-        nextAudioPromise = i + 1 < sentences.length ? speakSentence(sentences[i + 1], p.voiceId) : null
+        nextAudioPromise = i + 1 < sentences.length ? speakSentence(sentences[i + 1], p.voiceLocal, p.voiceCloud) : null
 
         if (audio) {
           const source = audioContext.createMediaElementSource(audio)

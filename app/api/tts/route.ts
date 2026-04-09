@@ -4,12 +4,12 @@ import { NextRequest } from "next/server"
   const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pFZP5JQG7iQjIQuC4Bku"
 
   export async function POST(req: NextRequest) {
-    const { text, voiceId } = await req.json()
+    const { text, voiceLocal, voiceCloud } = await req.json()
 
     if (ELEVENLABS_API_KEY) {
-      return handleElevenLabs(text, voiceId)
+      return handleElevenLabs(text, voiceCloud)
     }
-    return handleChatterbox(text)
+    return handleChatterbox(text, voiceLocal)
   }
 
   async function handleElevenLabs(text: string, voiceId?: string) {
@@ -43,14 +43,14 @@ import { NextRequest } from "next/server"
     }
   }
 
-  async function handleChatterbox(text: string) {
+  async function handleChatterbox(text: string, voiceId?: string) {
     try {
       const response = await fetch(`${TTS_URL}/v1/synthesize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input: text,
-          voice: "default",
+          voice: voiceId || "default",
           audioEncoding: "wav",
         }),
       })

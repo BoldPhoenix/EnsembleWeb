@@ -13,9 +13,10 @@ function Model({ modelPath }: { modelPath: string }) {
   useEffect(() => {
     mouthMeshes.current = []
 
-    // Add black backface clones for hollow mesh fix
+    // Add black backface clone only for the face mesh (has morph targets)
+    // Cloning ALL meshes doubles the polygon count and kills CPU
     scene.traverse((child: any) => {
-      if (child.isMesh && child.material) {
+      if (child.isMesh && child.morphTargetDictionary && child.morphTargetDictionary["Mouth_Open"] !== undefined) {
         const backMat = new THREE.MeshBasicMaterial({
           color: 0x000000,
           side: THREE.BackSide,
@@ -40,7 +41,13 @@ function Model({ modelPath }: { modelPath: string }) {
     })
   }, [actions, scene])
 
-  useFrame(() => {
+  const lastUpdate = useRef(0)
+  useFrame(({ clock }) => {
+    // Throttle to ~30fps
+    const now = clock.getElapsedTime()
+    if (now - lastUpdate.current < 0.033) return
+    lastUpdate.current = now
+
     for (const mesh of mouthMeshes.current) {
       const index = mesh.morphTargetDictionary["Mouth_Open"]
       mesh.morphTargetInfluences[index] = audioState.volume
@@ -52,7 +59,7 @@ function Model({ modelPath }: { modelPath: string }) {
 
 export default function Avatar({ modelPath = "/Aimee.glb" }: { modelPath?: string }) {
   return (
-    <Canvas camera={{ position: [0, 1, 3], fov: 50 }}>
+    <Canvas camera={{ position: [0, 1, 3], fov: 50 }} dpr={[1, 1.5]}>
       <ambientLight intensity={0.5} />
       <directionalLight position={[5, 5, 5]} intensity={1} />
       <Model modelPath={modelPath} />
