@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Tin Man Web — Meet Aimee & Arthur",
-  description: "Dual AI personalities with 3D avatars, voice cloning, lip sync, and shared memory. Stop chatting with a void — start collaborating with a team.",
+  title: "Ensemble",
+  description: "Ensemble — dual AI personalities with 3D avatars, voice cloning, lip sync, and shared memory. Stop chatting with a void — start collaborating with a team.",
 };
 
 export default function RootLayout({

@@ -4,7 +4,7 @@ import Link from "next/link"
     return (
       <header className="flex items-center justify-between w-full bg-zinc-800 px-6 py-3">
         <Link href="/" className="text-xl font-bold text-white hover:text-blue-400">
-          Tin Man Web
+          Ensemble
         </Link>
         <nav className="flex gap-6">
           <Link href="/" className="text-zinc-400 hover:text-white">

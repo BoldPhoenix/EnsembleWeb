@@ -6,14 +6,14 @@ export default function About() {
     <div className="flex flex-col min-h-screen bg-zinc-900">
       <Header />
       <div className="flex flex-1 flex-col items-center gap-8 p-8 overflow-y-auto">
-        <h1 className="text-4xl font-bold text-white">About Tin Man Web</h1>
+        <h1 className="text-4xl font-bold text-white">About Ensemble</h1>
 
         <div className="max-w-2xl text-zinc-300 space-y-4">
           <p>
-            Tin Man Web is a full-stack AI collaboration platform featuring dual AI personalities
+            Ensemble is a full-stack AI collaboration platform featuring dual AI personalities
             with 3D animated avatars, real-time lip sync, voice cloning, web research tools,
             and persistent memory across sessions. Built as both a portfolio piece and a foundation
-            for the commercial Tin Man desktop product.
+            for the commercial Ensemble Desktop product.
           </p>
 
           <h2 className="text-2xl font-semibold text-white pt-4">The Characters</h2>
