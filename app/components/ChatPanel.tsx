@@ -77,6 +77,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
 
     async function handleSend(message: string) {
     if (!sessionId) return
+    audioState.stop()
     setIsLoading(true)
 
     // Reload personality in case it changed on settings page
@@ -260,12 +261,15 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
     const dataArray = new Uint8Array(analyser.frequencyBinCount)
 
     // Pre-fetch next sentence while current one plays
+    audioState.cancelAudio = false
     let nextAudioPromise: Promise<HTMLAudioElement | null> | null =
       sentences.length > 0 ? speakSentence(sentences[0], p.voiceLocal, p.voiceCloud) : null
 
     for (let i = 0; i < sentences.length; i++) {
+      if (audioState.cancelAudio) break
       try {
         const audio = await nextAudioPromise
+        if (audioState.cancelAudio) { audio?.pause(); break }
         // Start fetching the NEXT sentence immediately
         nextAudioPromise = i + 1 < sentences.length ? speakSentence(sentences[i + 1], p.voiceLocal, p.voiceCloud) : null
 
@@ -273,6 +277,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
           const source = audioContext.createMediaElementSource(audio)
           source.connect(analyser)
 
+          audioState.currentAudio = audio
           await audioContext.resume()
           audio.play()
 
