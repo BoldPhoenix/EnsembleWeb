@@ -37,6 +37,8 @@ You have tools you can use. To use a tool, output this pattern on its own line:
 Available tools:
 - web_search: Search the web. Args: {"query": "search terms"}
 - web_fetch: Fetch a web page as text. Args: {"url": "https://example.com"}
+- youtube_transcript: Get a YouTube video's title, description, and transcript. Args: {"url": "https://youtube.com/watch?v=xxx"}
+- reddit_read: Read a Reddit post and top comments. Args: {"url": "https://reddit.com/r/..."}
 
 After you output a TOOL_CALL line, STOP and wait. The system will execute the tool and give you the result. Then respond based on what you learned. Do NOT make up search results — wait for the actual data.`
 
