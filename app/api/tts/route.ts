@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"                                                                                                                   
-  const TTS_URL = process.env.TTS_URL || "http://192.168.86.126:8883"                                                                                           
+  const TTS_URL = process.env.TTS_URL || "http://localhost:8883"                                                                                           
   const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY
   const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pFZP5JQG7iQjIQuC4Bku"
 

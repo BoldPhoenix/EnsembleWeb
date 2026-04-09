@@ -3,7 +3,7 @@ export const maxDuration = 30
 import { NextRequest } from "next/server"
 import { buildMemoryContext } from "../../lib/memory"
 
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://192.168.86.126:11434"
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 
