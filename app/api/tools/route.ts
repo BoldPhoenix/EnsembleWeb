@@ -66,6 +66,28 @@ async function handleWebSearch(query: string) {
 async function handleWebFetch(url: string) {
   if (!url) return Response.json({ result: "URL is required" })
 
+  // Try Jina Reader first — converts any page to clean markdown
+  try {
+    const jinaResponse = await fetch(`https://r.jina.ai/${url}`, {
+      headers: {
+        "Accept": "text/markdown",
+      },
+    })
+
+    if (jinaResponse.ok) {
+      let text = await jinaResponse.text()
+      if (text.length > 30000) {
+        text = text.slice(0, 30000) + "\n\n[... content truncated at 30KB]"
+      }
+      return Response.json({
+        result: `Content from ${url}:\n\n${text}`,
+      })
+    }
+  } catch {
+    // Jina failed, fall back to raw fetch
+  }
+
+  // Fallback: raw HTML fetch with tag stripping
   try {
     const response = await fetch(url, {
       headers: {
@@ -75,27 +97,20 @@ async function handleWebFetch(url: string) {
 
     const html = await response.text()
 
-    // Strip HTML tags and extract text content
     let text = html
-      // Remove script and style blocks
       .replace(/<script[\s\S]*?<\/script>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
-      // Replace common block elements with newlines
       .replace(/<\/?(p|div|br|h[1-6]|li|tr)[^>]*>/gi, "\n")
-      // Remove all remaining tags
       .replace(/<[^>]+>/g, "")
-      // Decode HTML entities
       .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&nbsp;/g, " ")
-      // Clean up whitespace
       .replace(/\n\s*\n\s*\n/g, "\n\n")
       .trim()
 
-    // Truncate to 30KB
     if (text.length > 30000) {
       text = text.slice(0, 30000) + "\n\n[... content truncated at 30KB]"
     }
