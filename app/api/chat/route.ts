@@ -10,30 +10,32 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const DEFAULT_PROMPT = "You are a helpful assistant. Keep responses brief and conversational."
 
 export async function POST(req: NextRequest) {
-  const { messages, systemPrompt, image } = await req.json()
-  const basePrompt = systemPrompt || DEFAULT_PROMPT
-
-  // Build memory context from the latest user message
-  const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")
-  let memoryContext = ""
   try {
-    memoryContext = await buildMemoryContext(lastUserMsg?.content || "")
-  } catch {
-    // Memory is best-effort
-  }
+    const { messages, systemPrompt, image } = await req.json()
+    const basePrompt = systemPrompt || DEFAULT_PROMPT
 
-  const fullPrompt = memoryContext
-    ? `${basePrompt}\n\n${memoryContext}`
-    : basePrompt
+    // Build memory context — skip if DB unavailable
+    let fullPrompt = basePrompt
+    try {
+      const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")
+      const memoryContext = await buildMemoryContext(lastUserMsg?.content || "")
+      if (memoryContext) fullPrompt = `${basePrompt}\n\n${memoryContext}`
+    } catch {
+      // Memory is best-effort
+    }
 
-  // Priority: OpenRouter > Gemini > Ollama
-  if (OPENROUTER_API_KEY) {
-    return handleOpenRouter(messages, fullPrompt, image)
+    // Priority: OpenRouter > Gemini > Ollama
+    if (OPENROUTER_API_KEY) {
+      return handleOpenRouter(messages, fullPrompt, image)
+    }
+    if (GEMINI_API_KEY) {
+      return handleGemini(messages, fullPrompt, image)
+    }
+    return handleOllama(messages, fullPrompt, image)
+  } catch (error) {
+    console.error("Chat API error:", error)
+    return new Response(`Chat error: ${String(error)}`, { status: 500 })
   }
-  if (GEMINI_API_KEY) {
-    return handleGemini(messages, fullPrompt, image)
-  }
-  return handleOllama(messages, fullPrompt, image)
 }
 
 async function handleOpenRouter(messages: {role: string, content: string}[], systemPrompt: string, image?: string) {
