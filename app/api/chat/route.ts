@@ -60,7 +60,7 @@ async function handleOpenRouter(messages: {role: string, content: string}[], sys
       "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "google/gemma-4-31b-it:free",
+      model: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
       messages: orMessages,
     }),
   })
