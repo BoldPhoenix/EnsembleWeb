@@ -95,24 +95,27 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
         body: JSON.stringify({ role: "user", content: message, personality: currentPersonality }),
       })
 
+      // Limit history to last 20 messages to avoid old personality dominating
+      const recentMessages = updated.slice(-20)
+
       // Tag conversation history — label ALL messages from other personalities
-      const taggedMessages = updated.map(m => {
+      const taggedMessages = recentMessages.map(m => {
         if (m.role === "assistant" && m.personality && m.personality !== currentPersonality) {
           return { role: "assistant" as const, content: `[${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
         }
-        // Re-tag user messages that were directed at another personality
         if (m.role === "user" && m.personality && m.personality !== currentPersonality) {
           return { role: "user" as const, content: `[said to ${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
         }
         return { role: m.role, content: m.content }
       })
 
-      // Inject a switch notice if this session has messages from another personality
-      const hasOtherPersonality = updated.some(m => m.personality && m.personality !== currentPersonality)
+      // Always remind the model who it is when mixed personalities exist
+      const hasOtherPersonality = recentMessages.some(m => m.personality && m.personality !== currentPersonality)
       if (hasOtherPersonality) {
+        // Insert reminder right before the latest user message
         taggedMessages.splice(-1, 0, {
           role: "user" as const,
-          content: `[The user has switched to talking to you, ${p.name}. Previous messages from other personalities are labeled with their names. You are ${p.name} — respond in your own voice, not theirs.]`,
+          content: `[IMPORTANT: You are ${p.name}. The user is now talking to YOU. Do NOT respond as ${Object.values(personalities).filter(x => x.id !== currentPersonality).map(x => x.name).join(" or ")}. Respond only as ${p.name}.]`,
         })
       }
 
