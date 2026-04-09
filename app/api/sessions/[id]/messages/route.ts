@@ -18,9 +18,9 @@ import { prisma } from "../../../../lib/db"
     { params }: { params: Promise<{ id: string }> }
   ) {
     const { id } = await params
-    const { role, content } = await req.json()
+    const { role, content, personality } = await req.json()
     const message = await prisma.message.create({
-      data: { role, content, sessionId: id },
+      data: { role, content, personality: personality || "aimee", sessionId: id },
     })
     return Response.json(message)
   }

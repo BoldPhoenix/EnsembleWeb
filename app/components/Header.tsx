@@ -13,6 +13,12 @@ import Link from "next/link"
           <Link href="/chat" className="text-zinc-400 hover:text-white">
             Chat
           </Link>
+          <Link href="/about" className="text-zinc-400 hover:text-white">
+            About
+          </Link>
+          <Link href="/settings" className="text-zinc-400 hover:text-white">
+            Settings
+          </Link>
         </nav>
       </header>
     )

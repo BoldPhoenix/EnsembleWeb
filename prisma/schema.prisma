@@ -20,10 +20,11 @@ datasource db {
   }
 
   model Message {
-    id        String   @id @default(cuid())
-    role      String
-    content   String
-    createdAt DateTime @default(now())
-    session   Session  @relation(fields: [sessionId], references: [id])
-    sessionId String
+    id          String   @id @default(cuid())
+    role        String
+    content     String
+    personality String   @default("aimee")
+    createdAt   DateTime @default(now())
+    session     Session  @relation(fields: [sessionId], references: [id])
+    sessionId   String
   }

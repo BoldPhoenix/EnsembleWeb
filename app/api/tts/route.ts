@@ -4,18 +4,18 @@ import { NextRequest } from "next/server"
   const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "pFZP5JQG7iQjIQuC4Bku"
 
   export async function POST(req: NextRequest) {
-    const { text } = await req.json()
+    const { text, voiceId } = await req.json()
 
     if (ELEVENLABS_API_KEY) {
-      return handleElevenLabs(text)
+      return handleElevenLabs(text, voiceId)
     }
     return handleChatterbox(text)
   }
 
-  async function handleElevenLabs(text: string) {
+  async function handleElevenLabs(text: string, voiceId?: string) {
     try {
       const response = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId || ELEVENLABS_VOICE_ID}`,
         {
           method: "POST",
           headers: {

@@ -4,11 +4,13 @@ import { useState, useEffect, useRef } from "react"
 import MessageBubble from "./MessageBubble"
 import ChatInput from "./ChatInput"
 import { audioState } from "../lib/audioState"
+import { personalities, defaultPersonality } from "../lib/personalities"
 
     export default function ChatPanel() {
-    const [messages, setMessages] = useState<{role: string, content: string}[]>([])
+    const [messages, setMessages] = useState<{role: string, content: string, personality?: string}[]>([])
     const [sessionId, setSessionId] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
+    const [personality, setPersonality] = useState(defaultPersonality)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -16,15 +18,40 @@ import { audioState } from "../lib/audioState"
   }, [messages])
 
     useEffect(() => {
-      async function createSession() {
+      async function initSession() {
+        // Load personality
+        const savedPersonality = localStorage.getItem("tinman-personality")
+        if (savedPersonality && personalities[savedPersonality]) {
+          setPersonality(savedPersonality)
+        }
+
+        // Check for existing session
+        const savedId = localStorage.getItem("tinman-session-id")
+        if (savedId) {
+          const res = await fetch(`/api/sessions/${savedId}/messages`)
+          if (res.ok) {
+            const msgs = await res.json()
+            if (msgs.length > 0) {
+              setMessages(msgs.map((m: any) => ({ role: m.role, content: m.content, personality: m.personality })))
+              setSessionId(savedId)
+              return
+            }
+          }
+        }
+        // Create new session
         const res = await fetch("/api/sessions", { method: "POST" })
         const session = await res.json()
         setSessionId(session.id)
+        localStorage.setItem("tinman-session-id", session.id)
       }
-      createSession()
+      initSession()
     }, [])
 
-    async function speakSentence(text: string) {
+    async function speakSentence(text: string, voiceId?: string) {
+    // Skip empty or too-short text
+    const cleaned = text.replace(/\./g, '').replace(/\s/g, '').trim()
+    if (cleaned.length < 2) return null
+
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 10000)
@@ -32,7 +59,7 @@ import { audioState } from "../lib/audioState"
       const ttsResponse = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, voiceId }),
         signal: controller.signal,
       })
       clearTimeout(timeout)
@@ -52,6 +79,11 @@ import { audioState } from "../lib/audioState"
     if (!sessionId) return
     setIsLoading(true)
 
+    // Reload personality in case it changed on settings page
+    const currentPersonality = localStorage.getItem("tinman-personality") || defaultPersonality
+    setPersonality(currentPersonality)
+    const p = personalities[currentPersonality]
+
     const updated = [...messages, { role: "user", content: message }]
     setMessages(updated)
 
@@ -59,13 +91,21 @@ import { audioState } from "../lib/audioState"
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "user", content: message }),
+        body: JSON.stringify({ role: "user", content: message, personality: currentPersonality }),
       })
-      
+
+      // Tag conversation history with personality names for context
+      const taggedMessages = updated.map(m => ({
+        role: m.role,
+        content: m.role === "assistant" && m.personality && m.personality !== currentPersonality
+          ? `[${personalities[m.personality]?.name || m.personality}]: ${m.content}`
+          : m.content,
+      }))
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updated }),
+        body: JSON.stringify({ messages: taggedMessages, systemPrompt: p.systemPrompt }),
       })
 
       if (!response.body) return
@@ -74,7 +114,7 @@ import { audioState } from "../lib/audioState"
       const decoder = new TextDecoder("utf-8", { fatal: false })
       let aiMessage = ""
       let spokenText = ""
-      const audioQueue: Array<Promise<HTMLAudioElement | null>> = []
+      const sentences: string[] = []
 
       setMessages([...updated, { role: "assistant", content: "" }])
 
@@ -96,13 +136,14 @@ import { audioState } from "../lib/audioState"
               aiMessage += data.message.content
               setMessages([...updated, { role: "assistant", content: aiMessage }])
 
-              // Check for complete sentences to speak
+              // Collect complete sentences for TTS
               const unspoken = aiMessage.slice(spokenText.length)
               const sentenceMatch = unspoken.match(/[^.!?]*[.!?]\s*/g)
               if (sentenceMatch) {
                 for (const sentence of sentenceMatch) {
                   spokenText += sentence
-                 audioQueue.push(speakSentence(sentence.trim()))
+                  const cleanText = sentence.trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+                  if (cleanText) sentences.push(cleanText)
                 }
               }
             }
@@ -112,34 +153,38 @@ import { audioState } from "../lib/audioState"
         }
       }
 
-      // Speak any remaining text that didn't end with punctuation
-      const remaining = aiMessage.slice(spokenText.length).trim()
-      if (remaining) {
-        audioQueue.push(speakSentence(remaining))
-      }
+      // Add any remaining text
+      const remaining = aiMessage.slice(spokenText.length).trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+      if (remaining) sentences.push(remaining)
 
       // Save to DB immediately
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", content: aiMessage }),
+        body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
       })
 
-      // Play audio in background — don't block UI
-      // Mute mic while speaking to prevent feedback
-      const queue = [...audioQueue]
+      // Play audio sequentially — one TTS request at a time
       ;(async () => {
-    for (const audioPromise of queue) {
+    const audioContext = new AudioContext()
+    const analyser = audioContext.createAnalyser()
+    analyser.fftSize = 256
+    analyser.connect(audioContext.destination)
+    const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+    // Pre-fetch next sentence while current one plays
+    let nextAudioPromise: Promise<HTMLAudioElement | null> | null =
+      sentences.length > 0 ? speakSentence(sentences[0], p.voiceId) : null
+
+    for (let i = 0; i < sentences.length; i++) {
       try {
-        const audio = await audioPromise
+        const audio = await nextAudioPromise
+        // Start fetching the NEXT sentence immediately
+        nextAudioPromise = i + 1 < sentences.length ? speakSentence(sentences[i + 1], p.voiceId) : null
+
         if (audio) {
-          const audioContext = new AudioContext()
           const source = audioContext.createMediaElementSource(audio)
-          const analyser = audioContext.createAnalyser()
-          analyser.fftSize = 256
           source.connect(analyser)
-          analyser.connect(audioContext.destination)
-          const dataArray = new Uint8Array(analyser.frequencyBinCount)
 
           await audioContext.resume()
           audio.play()
@@ -159,7 +204,6 @@ import { audioState } from "../lib/audioState"
           await new Promise<void>(resolve => {
             audio.onended = () => {
               audioState.volume = 0
-              audioContext.close()
               resolve()
             }
             audio.onerror = () => {
@@ -168,10 +212,12 @@ import { audioState } from "../lib/audioState"
             }
           })
         }
-      } catch {
+      } catch (e) {
+        console.error("Audio playback error:", e)
         audioState.volume = 0
       }
     }
+    audioContext.close()
   })()
       
     } catch (error) {
@@ -186,7 +232,7 @@ import { audioState } from "../lib/audioState"
   }
 
     return (
-      <div className="flex flex-col flex-1 p-4">
+      <div className="flex flex-col flex-1 p-4 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-y-auto space-y-2">
           {messages.map((msg, i) => (
             <MessageBubble key={i} role={msg.role} content={msg.content} />
