@@ -142,6 +142,7 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
               if (sentenceMatch) {
                 for (const sentence of sentenceMatch) {
                   spokenText += sentence
+                  if (sentence.includes("TOOL_CALL")) continue
                   const cleanText = sentence.trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
                   if (cleanText) sentences.push(cleanText)
                 }
@@ -153,9 +154,76 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
         }
       }
 
-      // Add any remaining text
-      const remaining = aiMessage.slice(spokenText.length).trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
-      if (remaining) sentences.push(remaining)
+      // Add any remaining text (skip tool calls)
+      const remainingRaw = aiMessage.slice(spokenText.length).trim()
+      if (!remainingRaw.includes("TOOL_CALL")) {
+        const remaining = remainingRaw.replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+        if (remaining) sentences.push(remaining)
+      }
+
+      // Check for tool calls in the response
+      const toolCallMatch = aiMessage.match(/\[TOOL_CALL:\s*(\w+)\s*\|\s*(\{[\s\S]*?\})\s*\]/)
+      if (toolCallMatch) {
+        const toolName = toolCallMatch[1]
+        let toolArgs: Record<string, string> = {}
+        try { toolArgs = JSON.parse(toolCallMatch[2]) } catch {}
+
+        // Strip tool call from displayed message
+        const cleanContent = aiMessage.replace(/\[TOOL_CALL:[\s\S]*?\]/, "").trim()
+        setMessages([...updated, { role: "assistant", content: cleanContent || `Using ${toolName}...` }])
+
+        // Execute the tool
+        const toolResult = await fetch("/api/tools", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tool: toolName, args: toolArgs }),
+        }).then(r => r.json())
+
+        // Feed result back to LLM for final response
+        const followUp = [
+          ...updated,
+          { role: "assistant", content: cleanContent },
+          { role: "user", content: `[Tool result from ${toolName}]:\n${toolResult.result}` },
+        ]
+
+        const followUpResponse = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: followUp, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined) }),
+        })
+
+        if (followUpResponse.body) {
+          const followReader = followUpResponse.body.getReader()
+          let followMessage = ""
+          let followBuffer = ""
+
+          while (true) {
+            const { done: fDone, value: fValue } = await followReader.read()
+            if (fDone) break
+            followBuffer += decoder.decode(fValue, { stream: true })
+            const fLines = followBuffer.split("\n")
+            followBuffer = fLines.pop() || ""
+            for (const fLine of fLines) {
+              if (!fLine.trim()) continue
+              try {
+                const fData = JSON.parse(fLine)
+                if (fData.message?.content) {
+                  followMessage += fData.message.content
+                  setMessages([...updated, { role: "assistant", content: followMessage }])
+                }
+              } catch {}
+            }
+          }
+          aiMessage = followMessage
+
+          // Collect sentences from follow-up for TTS
+          const followSentences = followMessage.match(/[^.!?]*[.!?]\s*/g) || [followMessage]
+          for (const s of followSentences) {
+            const clean = s.trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+            if (clean) sentences.push(clean)
+          }
+        }
+      }
 
       // Save to DB immediately
       const savedMsg = await fetch(`/api/sessions/${sessionId}/messages`, {

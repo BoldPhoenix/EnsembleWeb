@@ -26,11 +26,22 @@ export const personalities: Record<string, Personality> = {
   },
 }
 
+const TOOL_INSTRUCTIONS = `
+
+You have tools you can use. To use a tool, output this pattern on its own line:
+[TOOL_CALL: tool_name | {"arg": "value"}]
+
+Available tools:
+- web_search: Search the web. Args: {"query": "search terms"}
+- web_fetch: Fetch a web page as text. Args: {"url": "https://example.com"}
+
+After you output a TOOL_CALL line, STOP and wait. The system will execute the tool and give you the result. Then respond based on what you learned. Do NOT make up search results — wait for the actual data.`
+
 export function buildSystemPrompt(personalityId: string, userDescription?: string): string {
   const p = personalities[personalityId]
   if (!p) return ""
   const description = userDescription || p.defaultDescription
-  return `${p.basePrompt}\n\nYour personality: ${description}`
+  return `${p.basePrompt}\n\nYour personality: ${description}${TOOL_INSTRUCTIONS}`
 }
 
 export const defaultPersonality = "aimee"
