@@ -64,6 +64,10 @@ async function handleOpenRouter(messages: {role: string, content: string}[], sys
     body: JSON.stringify({
       model: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
       messages: orMessages,
+      temperature: 0.7,
+      frequency_penalty: 0.2,  // mild — too high causes prompt leakage
+      presence_penalty: 0.1,
+      max_tokens: 2048,        // generous for code blocks; loop control via penalties
     }),
   })
 
