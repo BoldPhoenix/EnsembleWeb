@@ -6,6 +6,22 @@ import ChatInput from "./ChatInput"
 import { audioState } from "../lib/audioState"
 import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/personalities"
 
+// Strip stage directions, action descriptions, and markdown so TTS doesn't read them.
+// Order matters: remove bracketed/asterisked CONTENT before generic char filters.
+function sanitizeForTTS(text: string): string {
+  return text
+    .replace(/\*[^*\n]+\*/g, '')      // *adjusts monocle*
+    .replace(/_[^_\n]+_/g, '')         // _leans forward_
+    .replace(/\[[^\]\n]+\]/g, '')      // [smiles warmly]
+    .replace(/\([^)\n]*\b(?:laughs|smiles|sighs|nods|chuckles|grins|pauses|whispers|shrugs)\b[^)\n]*\)/gi, '') // (laughs)
+    .replace(/\*\*/g, '')
+    .replace(/#{1,6}\s/g, '')
+    .replace(/`/g, '')
+    .replace(/[^\w\s,.!?'-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
     export default function ChatPanel() {
     const [messages, setMessages] = useState<{role: string, content: string, personality?: string}[]>([])
     const [sessionId, setSessionId] = useState<string | null>(null)
@@ -98,13 +114,18 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
       // Limit history to last 20 messages to avoid old personality dominating
       const recentMessages = updated.slice(-20)
 
-      // Tag conversation history — label ALL messages from other personalities
+      // Convert other-personality assistant messages to user-role context notes.
+      // Why: leaving them as assistant-role with inline [Name]: tags causes the
+      // model to treat the history as a tagged transcript and auto-complete
+      // multiple [Name]: turns in a single response.
       const taggedMessages = recentMessages.map(m => {
         if (m.role === "assistant" && m.personality && m.personality !== currentPersonality) {
-          return { role: "assistant" as const, content: `[${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
+          const otherName = personalities[m.personality]?.name || m.personality
+          return { role: "user" as const, content: `(Context: earlier in this session, ${otherName} said: "${m.content}")` }
         }
         if (m.role === "user" && m.personality && m.personality !== currentPersonality) {
-          return { role: "user" as const, content: `[said to ${personalities[m.personality]?.name || m.personality}]: ${m.content}` }
+          const otherName = personalities[m.personality]?.name || m.personality
+          return { role: "user" as const, content: `(Context: the user previously said this to ${otherName}, not to you: "${m.content}")` }
         }
         return { role: m.role, content: m.content }
       })
@@ -133,6 +154,15 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
       let spokenText = ""
       const sentences: string[] = []
 
+      // Strip non-speakable content from text before sentence detection.
+      // - Tool calls: URL dots fool the sentence splitter into TTS'ing fragments
+      // - Code blocks: nobody wants to hear Arthur dictate Python line by line
+      // - Inline code: keep the content but drop the backticks (handled by sanitizer)
+      const stripToolCalls = (s: string) =>
+        s
+          .replace(/```[\s\S]*?```/g, '')      // fenced code blocks
+          .replace(/\[TOOL_CALL:[\s\S]*?\]/g, '')
+
       setMessages([...updated, { role: "assistant", content: "" }])
 
       let buffer = ""
@@ -153,14 +183,15 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
               aiMessage += data.message.content
               setMessages([...updated, { role: "assistant", content: aiMessage }])
 
-              // Collect complete sentences for TTS
-              const unspoken = aiMessage.slice(spokenText.length)
+              // Sentence detection runs on the tool-call-stripped text only.
+              // This avoids URL fragments inside tool calls being sent to TTS.
+              const speakable = stripToolCalls(aiMessage)
+              const unspoken = speakable.slice(spokenText.length)
               const sentenceMatch = unspoken.match(/[^.!?]*[.!?]\s*/g)
               if (sentenceMatch) {
                 for (const sentence of sentenceMatch) {
                   spokenText += sentence
-                  if (sentence.includes("TOOL_CALL")) continue
-                  const cleanText = sentence.trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+                  const cleanText = sanitizeForTTS(sentence)
                   if (cleanText) sentences.push(cleanText)
                 }
               }
@@ -171,12 +202,10 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
         }
       }
 
-      // Add any remaining text (skip tool calls)
-      const remainingRaw = aiMessage.slice(spokenText.length).trim()
-      if (!remainingRaw.includes("TOOL_CALL")) {
-        const remaining = remainingRaw.replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
-        if (remaining) sentences.push(remaining)
-      }
+      // Add any remaining text (tool calls already stripped)
+      const remainingRaw = stripToolCalls(aiMessage).slice(spokenText.length).trim()
+      const remaining = sanitizeForTTS(remainingRaw)
+      if (remaining) sentences.push(remaining)
 
       // Check for tool calls in the response
       const toolCallMatch = aiMessage.match(/\[TOOL_CALL:\s*(\w+)\s*\|\s*(\{[\s\S]*?\})\s*\]/)
@@ -185,8 +214,8 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
         let toolArgs: Record<string, string> = {}
         try { toolArgs = JSON.parse(toolCallMatch[2]) } catch {}
 
-        // Strip tool call from displayed message
-        const cleanContent = aiMessage.replace(/\[TOOL_CALL:[\s\S]*?\]/, "").trim()
+        // Strip ALL tool calls from displayed message (model sometimes loops and emits many)
+        const cleanContent = aiMessage.replace(/\[TOOL_CALL:[\s\S]*?\]/g, "").trim()
         setMessages([...updated, { role: "assistant", content: cleanContent || `Using ${toolName}...` }])
 
         // Execute the tool
@@ -241,10 +270,11 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
           }
           aiMessage = followMessage
 
-          // Collect sentences from follow-up for TTS
-          const followSentences = followMessage.match(/[^.!?]*[.!?]\s*/g) || [followMessage]
+          // Collect sentences from follow-up for TTS — strip tool calls first
+          const speakableFollow = stripToolCalls(followMessage)
+          const followSentences = speakableFollow.match(/[^.!?]*[.!?]\s*/g) || [speakableFollow]
           for (const s of followSentences) {
-            const clean = s.trim().replace(/\*\*/g, '').replace(/\*/g, '').replace(/#{1,6}\s/g, '').replace(/`/g, '').replace(/[^\w\s,.!?'-]/g, '')
+            const clean = sanitizeForTTS(s)
             if (clean) sentences.push(clean)
           }
         }
@@ -301,28 +331,28 @@ import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/per
             if (!audio.paused) {
               analyser.getByteFrequencyData(dataArray)
               const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
-              audioState.volume = Math.min(avg / 80, 1)
+              audioState.setVolume(Math.min(avg / 80, 1))
               requestAnimationFrame(updateVolume)
             } else {
-              audioState.volume = 0
+              audioState.setVolume(0)
             }
           }
           updateVolume()
 
           await new Promise<void>(resolve => {
             audio.onended = () => {
-              audioState.volume = 0
+              audioState.setVolume(0)
               resolve()
             }
             audio.onerror = () => {
-              audioState.volume = 0
+              audioState.setVolume(0)
               resolve()
             }
           })
         }
       } catch (e) {
         console.error("Audio playback error:", e)
-        audioState.volume = 0
+        audioState.setVolume(0)
       }
     }
     audioContext.close()
