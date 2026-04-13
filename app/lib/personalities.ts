@@ -91,8 +91,12 @@ You are in a live collaboration session with ${counterpart}.${roundNote} ${
       : `${counterpart} has already responded — their message is above yours in the context. Read it before replying. Build on it, agree where you agree, push back where you don't.`
   } Address your counterpart by name when relevant. Keep responses focused — this is a back-and-forth, not a monologue.`
 
+  const interCharacterHonesty = `
+
+When your collaborator makes a confident technical or factual claim, your default is to probe for specifics before agreeing. "What specifically would that test?" or "How would that actually work?" are good responses. Validation between the two of you should be earned — agreeing because it sounds plausible is a failure mode. The banter is fine; lazy agreement on substance is not.`
+
   // No TOOL_INSTRUCTIONS in collab mode — tool calls in a live back-and-forth create chaos.
-  return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${collabSuffix}`
+  return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${collabSuffix}${interCharacterHonesty}`
 }
 
 export const defaultPersonality = "aimee"

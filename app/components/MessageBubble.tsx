@@ -46,7 +46,7 @@ export default function MessageBubble({ role, content, personality, messageId, s
 
   return (
     <div className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}>
-      <div className={`rounded p-3 max-w-2xl prose prose-invert prose-sm ${role === "user" ? "bg-blue-600 text-white" : "bg-zinc-700 text-cyan-200"}`}>
+      <div className={`group rounded p-3 max-w-2xl prose prose-invert prose-sm ${role === "user" ? "bg-blue-600 text-white" : "bg-zinc-700 text-cyan-200"}`}>
         {role === "user" ? content : (
           <ReactMarkdown
             components={{
@@ -64,18 +64,18 @@ export default function MessageBubble({ role, content, personality, messageId, s
           </ReactMarkdown>
         )}
         {role === "assistant" && messageId && (
-          <div className="mt-2 flex justify-end">
+          <div className="mt-1 flex justify-end">
             <button
               onClick={reportSycophancy}
               disabled={reported}
-              className={`text-xs px-2 py-0.5 rounded transition-colors ${
+              className={`text-xs px-1.5 py-0.5 rounded transition-all opacity-0 group-hover:opacity-100 ${
                 reported
-                  ? "bg-yellow-900/30 text-yellow-600 cursor-default"
-                  : "bg-zinc-600/50 text-zinc-400 hover:bg-yellow-900/30 hover:text-yellow-400"
+                  ? "opacity-100 bg-yellow-900/30 text-yellow-600 cursor-default"
+                  : "bg-zinc-600/50 text-zinc-500 hover:bg-yellow-900/30 hover:text-yellow-400"
               }`}
-              title="Use this when the response validated you without pushing back or checking your assumptions."
+              title={reported ? "Flagged" : "Flag as sycophantic — they agreed without pushing back"}
             >
-              {reported ? "Got it" : "You're just agreeing with me"}
+              {reported ? "✓ flagged" : "⚑"}
             </button>
           </div>
         )}
