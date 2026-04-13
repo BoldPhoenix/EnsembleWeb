@@ -1,4 +1,5 @@
-import { prisma } from "./db"
+// All storage operations go through getMemoryStore(). Never call Prisma here.
+import { getMemoryStore } from './memory-store'
 
 // Stop words to ignore during topic extraction
 const STOP_WORDS = new Set([
@@ -72,17 +73,21 @@ export function extractKeyTerms(text: string): string[] {
 }
 
 /**
- * Extract topics from a conversation turn and upsert them into the database.
+ * Extract topics from a conversation turn and upsert them into the store.
+ * characterId = null stores as shared knowledge (visible to all characters).
  */
 export async function extractAndStoreTopics(
   userMessage: string,
   assistantMessage: string,
-  messageId: string
+  messageId: string,
+  characterId?: string | null
 ) {
   const combined = `${userMessage} ${assistantMessage}`
   const terms = extractKeyTerms(combined)
 
   if (terms.length === 0) return
+
+  const store = getMemoryStore()
 
   for (const term of terms) {
     // Build context snippet — sentences that mention this term
@@ -90,49 +95,22 @@ export async function extractAndStoreTopics(
     const relevant = sentences
       .filter(s => s.toLowerCase().includes(term))
       .map(s => s.trim())
-      .slice(0, 3) // max 3 sentences per topic per turn
+      .slice(0, 3)
 
     if (relevant.length === 0) continue
 
     const snippet = relevant.join(". ").slice(0, 500)
-
-    // Determine category based on context clues
     const category = categorize(term, snippet)
 
     try {
-      // Upsert — create or append to existing topic
-      const existing = await prisma.topic.findUnique({ where: { name: term } })
-
-      if (existing) {
-        // Append new context to existing summary
-        const updatedSummary = existing.summary.length < 2000
-          ? `${existing.summary}\n${snippet}`
-          : existing.summary // don't grow forever
-
-        await prisma.topic.update({
-          where: { name: term },
-          data: { summary: updatedSummary, category: category || existing.category },
-        })
-
-        // Link to message
-        await prisma.topicMessage.create({
-          data: { topicId: existing.id, messageId },
-        }).catch(() => {}) // ignore if already linked
-      } else {
-        // Create new topic
-        const topic = await prisma.topic.create({
-          data: {
-            name: term,
-            label: term.charAt(0).toUpperCase() + term.slice(1),
-            category,
-            summary: snippet,
-          },
-        })
-
-        await prisma.topicMessage.create({
-          data: { topicId: topic.id, messageId },
-        }).catch(() => {})
-      }
+      const topic = await store.upsertTopic(
+        term,
+        term.charAt(0).toUpperCase() + term.slice(1),
+        category,
+        snippet,
+        characterId ?? null
+      )
+      await store.linkTopicToMessage(topic.id, messageId)
     } catch (e) {
       // Topic extraction is best-effort — don't crash the chat
       console.error("Topic extraction error:", e)
@@ -162,18 +140,19 @@ function categorize(term: string, context: string): string {
 }
 
 /**
- * Get a compact summary of ALL known topics for the system prompt.
+ * Get a compact summary of topics for the system prompt.
+ * When characterId is provided, returns topics for that character + shared topics (null characterId).
+ * When omitted, returns all topics (legacy behavior, used when characterId is unknown).
  */
-export async function getAllTopicsSummary(): Promise<string> {
-  const topics = await prisma.topic.findMany({
-    orderBy: { updatedAt: "desc" },
-    take: 50, // cap at 50 topics to avoid prompt overflow
-  })
+export async function getAllTopicsSummary(characterId?: string): Promise<string> {
+  const store = getMemoryStore()
+  const topics = characterId
+    ? await store.findTopicsByCharacter(characterId, 50)
+    : await store.getAllTopics(50)
 
   if (topics.length === 0) return ""
 
   const lines = topics.map(t => {
-    // Truncate summary to first sentence
     const firstSentence = t.summary.split(/[.!?\n]/).filter(s => s.trim())[0] || t.summary
     return `- ${t.label} [${t.category}]: ${firstSentence.trim().slice(0, 150)}`
   })
@@ -187,11 +166,8 @@ export async function getAllTopicsSummary(): Promise<string> {
 export async function lookupTopics(terms: string[]): Promise<string> {
   if (terms.length === 0) return ""
 
-  const topics = await prisma.topic.findMany({
-    where: {
-      name: { in: terms },
-    },
-  })
+  const store = getMemoryStore()
+  const topics = await store.findTopicsByKeywords(terms)
 
   if (topics.length === 0) return ""
 
@@ -206,19 +182,8 @@ export async function lookupTopics(terms: string[]): Promise<string> {
  * Get session summaries for the system prompt.
  */
 export async function getSessionSummaries(): Promise<string> {
-  const sessions = await prisma.session.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 10,
-    include: {
-      messages: {
-        take: 6,
-        where: { role: "user" },
-        orderBy: { createdAt: "asc" },
-        select: { content: true, createdAt: true },
-      },
-      _count: { select: { messages: true } },
-    },
-  })
+  const store = getMemoryStore()
+  const sessions = await store.getRecentSessions(10)
 
   if (sessions.length === 0) return ""
 
@@ -226,8 +191,8 @@ export async function getSessionSummaries(): Promise<string> {
     const date = s.createdAt.toLocaleDateString("en-US", {
       weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
     })
-    const previews = s.messages.map(m => m.content.slice(0, 60)).join(" | ")
-    return `- Session ${date} (${s._count.messages} msgs): ${previews}`
+    const previews = s.previewMessages.join(" | ")
+    return `- Session ${date} (${s.messageCount} msgs): ${previews}`
   })
 
   return `Recent conversation history:\n${lines.join("\n")}`
@@ -235,12 +200,13 @@ export async function getSessionSummaries(): Promise<string> {
 
 /**
  * Build the full memory context to inject into the system prompt.
+ * characterId scopes topic recall to that character + shared knowledge.
  */
-export async function buildMemoryContext(userMessage: string): Promise<string> {
+export async function buildMemoryContext(userMessage: string, characterId?: string): Promise<string> {
   const terms = extractKeyTerms(userMessage)
 
   const [topicsSummary, relevantTopics, sessionSummaries] = await Promise.all([
-    getAllTopicsSummary(),
+    getAllTopicsSummary(characterId),
     lookupTopics(terms),
     getSessionSummaries(),
   ])

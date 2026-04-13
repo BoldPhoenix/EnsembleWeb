@@ -45,6 +45,17 @@ next-env.d.ts
 .agents/
 skills-lock.json
 
+# backup files from AI-assisted edits (we have backups elsewhere)
+*.bak
+*.bak2
+*.bak3
+
+# large source assets — full-res character models, Blender files, etc.
+# These are kept locally but not in the public repo to avoid bloat.
+/FullModels/
+*.blend
+*.blend1
+
 # neon
 .neon
 

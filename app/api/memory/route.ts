@@ -4,8 +4,8 @@ import { extractAndStoreTopics, buildMemoryContext } from "../../lib/memory"
 // POST — extract topics from a conversation turn
 export async function POST(req: NextRequest) {
   try {
-    const { userMessage, assistantMessage, messageId } = await req.json()
-    await extractAndStoreTopics(userMessage, assistantMessage, messageId)
+    const { userMessage, assistantMessage, messageId, personality } = await req.json()
+    await extractAndStoreTopics(userMessage, assistantMessage, messageId, personality ?? null)
     return Response.json({ ok: true })
   } catch (error) {
     console.error("Memory extraction error:", error)
@@ -17,7 +17,8 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const userMessage = req.nextUrl.searchParams.get("q") || ""
-    const context = await buildMemoryContext(userMessage)
+    const characterId = req.nextUrl.searchParams.get("character") || undefined
+    const context = await buildMemoryContext(userMessage, characterId)
     return Response.json({ context })
   } catch (error) {
     console.error("Memory recall error:", error)

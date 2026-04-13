@@ -82,7 +82,7 @@ export default function About() {
               LinkedIn
             </a>
             <a
-              href="https://github.com/BoldPhoenix/TinManWeb"
+              href="https://github.com/BoldPhoenix/ensemble-web"
               target="_blank"
               rel="noopener noreferrer"
               className="rounded bg-zinc-700 px-4 py-2 text-white hover:bg-zinc-600"

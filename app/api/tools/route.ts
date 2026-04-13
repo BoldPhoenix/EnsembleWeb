@@ -1,4 +1,6 @@
 import { NextRequest } from "next/server"
+import { chromium } from "playwright-core"
+import { Tracer } from "../../lib/tracer"
 
 // Helper to fetch with a strict timeout
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 8000): Promise<Response> {
@@ -12,21 +14,72 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
   }
 }
 
+// Lightpanda cloud headless browser for JS-rendered page fetching.
+// Falls back to Jina Reader if not configured or if Lightpanda fails.
+// 9× faster than Chrome headless, 16× less memory, designed for AI agents.
+async function fetchViaLightpanda(url: string, timeoutMs = 15000): Promise<string | null> {
+  const token = process.env.LIGHTPANDA_TOKEN
+  if (!token) return null
+
+  const region = process.env.LIGHTPANDA_REGION || "uswest"
+  const endpoint = `wss://${region}.cloud.lightpanda.io/ws?token=${token}`
+
+  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null
+  try {
+    // Connect to remote Lightpanda over CDP via WebSocket
+    browser = await chromium.connectOverCDP(endpoint, { timeout: timeoutMs })
+    const context = browser.contexts()[0] || (await browser.newContext())
+    const page = await context.newPage()
+
+    // Navigate with timeout — load event fires when JS is done executing
+    await page.goto(url, { waitUntil: "load", timeout: timeoutMs })
+
+    // Pull the rendered text content of the body
+    const text = await page.evaluate(() => {
+      const body = document.body
+      if (!body) return ""
+      // Strip script/style tags before grabbing text so we don't include code
+      const clone = body.cloneNode(true) as HTMLElement
+      clone.querySelectorAll("script, style, noscript").forEach(el => el.remove())
+      return clone.innerText || clone.textContent || ""
+    })
+
+    await page.close()
+    return text.trim()
+  } catch (err) {
+    console.error("Lightpanda fetch failed:", err)
+    return null
+  } finally {
+    if (browser) await browser.close().catch(() => {})
+  }
+}
+
 export async function POST(req: NextRequest) {
-  const { tool, args } = await req.json()
+  const { tool, args, sessionId } = await req.json()
+  const tracer = new Tracer(sessionId)
+
+  const start = Date.now()
+  let response: Response
 
   switch (tool) {
     case "web_search":
-      return handleWebSearch(args.query)
+      response = await handleWebSearch(args.query)
+      break
     case "web_fetch":
-      return handleWebFetch(args.url)
+      response = await handleWebFetch(args.url)
+      break
     case "youtube_transcript":
-      return handleYouTubeTranscript(args.url)
+      response = await handleYouTubeTranscript(args.url)
+      break
     case "reddit_read":
-      return handleRedditRead(args.url)
+      response = await handleRedditRead(args.url)
+      break
     default:
       return Response.json({ error: `Unknown tool: ${tool}` }, { status: 400 })
   }
+
+  tracer.fire('tool_use', { tool, success: response.ok }, response.ok ? 'ok' : 'error', Date.now() - start)
+  return response
 }
 
 async function handleWebSearch(query: string) {
@@ -80,7 +133,21 @@ async function handleWebSearch(query: string) {
 async function handleWebFetch(url: string) {
   if (!url) return Response.json({ result: "URL is required" })
 
-  // Try Jina Reader first
+  // Provider chain: Lightpanda (if configured) → Jina Reader → raw HTML.
+  // Lightpanda handles JS-rendered pages cleanly. Jina is fast for static
+  // content. Raw HTML is the always-works last resort.
+
+  // 1. Try Lightpanda first if token is configured
+  const lightpandaText = await fetchViaLightpanda(url)
+  if (lightpandaText && lightpandaText.length > 100) {
+    let text = lightpandaText
+    if (text.length > 30000) {
+      text = text.slice(0, 30000) + "\n\n[... content truncated at 30KB]"
+    }
+    return Response.json({ result: `Content from ${url}:\n\n${text}` })
+  }
+
+  // 2. Try Jina Reader (fast and clean for static pages)
   try {
     const jinaResponse = await fetchWithTimeout(`https://r.jina.ai/${url}`, {
       headers: { "Accept": "text/markdown" },
@@ -97,7 +164,7 @@ async function handleWebFetch(url: string) {
     // Jina failed, fall back
   }
 
-  // Fallback: raw HTML fetch
+  // 3. Last resort: raw HTML fetch with crude tag stripping
   try {
     const response = await fetchWithTimeout(url, {
       headers: {
@@ -190,7 +257,7 @@ async function handleRedditRead(url: string) {
   try {
     const jsonUrl = url.replace(/\/$/, "") + ".json"
     const response = await fetchWithTimeout(jsonUrl, {
-      headers: { "User-Agent": "TinManWeb/1.0" },
+      headers: { "User-Agent": "EnsembleWeb/1.0" },
     })
 
     if (!response.ok) {

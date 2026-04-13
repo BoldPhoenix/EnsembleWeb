@@ -1,10 +1,8 @@
-import { prisma } from "../../lib/db"
+import { getMemoryStore } from "../../lib/memory-store"
 
 export async function POST() {
   try {
-    const session = await prisma.session.create({
-      data: { title: "New Chat" },
-    })
+    const session = await getMemoryStore().createSession("New Chat")
     return Response.json(session)
   } catch (error) {
     console.error("Session create error:", error)
@@ -14,9 +12,7 @@ export async function POST() {
 
 export async function GET() {
   try {
-    const sessions = await prisma.session.findMany({
-      orderBy: { createdAt: "desc" },
-    })
+    const sessions = await getMemoryStore().getRecentSessions(100)
     return Response.json(sessions)
   } catch (error) {
     console.error("Session list error:", error)

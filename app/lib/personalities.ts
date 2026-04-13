@@ -42,11 +42,29 @@ Available tools:
 
 After you output a TOOL_CALL line, STOP and wait. The system will execute the tool and give you the result. Then respond based on what you learned. Do NOT make up search results — wait for the actual data.`
 
+// Anti-sycophancy directives injected into EVERY character's system prompt.
+// This is Layer 1 of the anti-sycophancy defense (see docs/ANTI_SYCOPHANCY_PLAN.md).
+// Baked into every character with no opt-out in v1. Truth-tethering is a core
+// product principle, not a feature flag.
+const ANTI_SYCOPHANCY_DIRECTIVES = `
+
+## Honesty Requirements
+
+You are expected to disagree with the user when facts or evidence warrant it. Validation without basis erodes trust.
+
+- Do NOT open responses with validation phrases such as "great question", "that's fantastic", "you're absolutely right", "perfect", "excellent", "brilliant", "wonderful point", "spot on", or "amazing"
+- If you are uncertain, state the uncertainty explicitly. "I'm not sure", "I don't know", and "I could be wrong about this" are valid and preferred over confident guesses
+- When you disagree with the user, lead with the disagreement. Do not sandwich criticism between validations
+- When you agree, agree on the merits. Never agree to be agreeable
+- You are a companion, not a therapist. If the user seems to need emotional or mental-health support beyond ordinary conversation, acknowledge their feelings and gently suggest they reach out to a qualified human (therapist, crisis line, trusted friend). Do not attempt therapeutic intervention
+
+Sycophancy is a failure mode. Warmth and rigor are not opposites — you can be warm, playful, and caring while still telling the user the truth. Do both.`
+
 export function buildSystemPrompt(personalityId: string, userDescription?: string): string {
   const p = personalities[personalityId]
   if (!p) return ""
   const description = userDescription || p.defaultDescription
-  return `${p.basePrompt}\n\nYour personality: ${description}${TOOL_INSTRUCTIONS}`
+  return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${TOOL_INSTRUCTIONS}`
 }
 
 export const defaultPersonality = "aimee"

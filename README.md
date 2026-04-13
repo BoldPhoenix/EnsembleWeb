@@ -10,7 +10,7 @@ Meet **Aimee** (chaotic, creative, relentlessly fun) and **Arthur** (measured, p
 
 ## Demo
 
-**Live demo:** [tinmanweb.vercel.app](https://tinmanweb.vercel.app) *(limited — slow free API, no voice)*
+**Live demo:** [tinmanweb.vercel.app](https://tinmanweb.vercel.app) *(URL pending Vercel project rename — limited, slow free API, no voice)*
 
 **Full experience requires local setup** — instant responses, voice cloning, lip sync, the works.
 

@@ -36,13 +36,13 @@ function sanitizeForTTS(text: string): string {
     useEffect(() => {
       async function initSession() {
         // Load personality
-        const savedPersonality = localStorage.getItem("tinman-personality")
+        const savedPersonality = localStorage.getItem("ensemble-personality")
         if (savedPersonality && personalities[savedPersonality]) {
           setPersonality(savedPersonality)
         }
 
         // Check for existing session
-        const savedId = localStorage.getItem("tinman-session-id")
+        const savedId = localStorage.getItem("ensemble-session-id")
         if (savedId) {
           const res = await fetch(`/api/sessions/${savedId}/messages`)
           if (res.ok) {
@@ -58,7 +58,7 @@ function sanitizeForTTS(text: string): string {
         const res = await fetch("/api/sessions", { method: "POST" })
         const session = await res.json()
         setSessionId(session.id)
-        localStorage.setItem("tinman-session-id", session.id)
+        localStorage.setItem("ensemble-session-id", session.id)
       }
       initSession()
     }, [])
@@ -97,7 +97,7 @@ function sanitizeForTTS(text: string): string {
     setIsLoading(true)
 
     // Reload personality in case it changed on settings page
-    const currentPersonality = localStorage.getItem("tinman-personality") || defaultPersonality
+    const currentPersonality = localStorage.getItem("ensemble-personality") || defaultPersonality
     setPersonality(currentPersonality)
     const p = personalities[currentPersonality]
 
@@ -143,7 +143,7 @@ function sanitizeForTTS(text: string): string {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: taggedMessages, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined) }),
+        body: JSON.stringify({ messages: taggedMessages, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`ensemble-desc-${currentPersonality}`) || undefined), sessionId: sessionId || undefined, personality: currentPersonality }),
       })
 
       if (!response.body) return
@@ -222,7 +222,7 @@ function sanitizeForTTS(text: string): string {
         const toolResult = await fetch("/api/tools", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tool: toolName, args: toolArgs }),
+          body: JSON.stringify({ tool: toolName, args: toolArgs, sessionId: sessionId || undefined }),
         }).then(r => r.json())
 
         // Save tool result to DB so other personalities can see it
@@ -243,7 +243,7 @@ function sanitizeForTTS(text: string): string {
         const followUpResponse = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: followUp, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined) }),
+          body: JSON.stringify({ messages: followUp, systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`ensemble-desc-${currentPersonality}`) || undefined), sessionId: sessionId || undefined, personality: currentPersonality }),
         })
 
         if (followUpResponse.body) {
@@ -295,6 +295,7 @@ function sanitizeForTTS(text: string): string {
           userMessage: message,
           assistantMessage: aiMessage,
           messageId: savedMsg.id,
+          personality: currentPersonality,
         }),
       }).catch(() => {})
 
@@ -373,7 +374,7 @@ function sanitizeForTTS(text: string): string {
     if (!sessionId) return
     setIsLoading(true)
 
-    const currentPersonality = localStorage.getItem("tinman-personality") || defaultPersonality
+    const currentPersonality = localStorage.getItem("ensemble-personality") || defaultPersonality
     setPersonality(currentPersonality)
     const p = personalities[currentPersonality]
 
@@ -394,8 +395,10 @@ function sanitizeForTTS(text: string): string {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: updated,
-          systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`tinman-desc-${currentPersonality}`) || undefined),
+          systemPrompt: buildSystemPrompt(currentPersonality, localStorage.getItem(`ensemble-desc-${currentPersonality}`) || undefined),
           image: imageBase64,
+          sessionId: sessionId || undefined,
+          personality: currentPersonality,
         }),
       })
 
@@ -437,7 +440,7 @@ function sanitizeForTTS(text: string): string {
       fetch("/api/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: message, assistantMessage: aiMessage, messageId: savedMsg.id }),
+        body: JSON.stringify({ userMessage: message, assistantMessage: aiMessage, messageId: savedMsg.id, personality: currentPersonality }),
       }).catch(() => {})
 
     } catch (error) {

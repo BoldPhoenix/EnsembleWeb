@@ -10,14 +10,14 @@ export default function Chat() {
   const [personality, setPersonality] = useState(defaultPersonality)
 
   useEffect(() => {
-    const saved = localStorage.getItem("tinman-personality")
+    const saved = localStorage.getItem("ensemble-personality")
     if (saved && personalities[saved]) {
       setPersonality(saved)
     }
 
     // Listen for personality changes from settings page
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === "tinman-personality" && e.newValue && personalities[e.newValue]) {
+      if (e.key === "ensemble-personality" && e.newValue && personalities[e.newValue]) {
         setPersonality(e.newValue)
       }
     }

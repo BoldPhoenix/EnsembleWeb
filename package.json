@@ -1,5 +1,5 @@
 {
-  "name": "tinmanweb",
+  "name": "ensemble-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -15,6 +15,7 @@
     "@react-three/fiber": "^9.5.0",
     "@tailwindcss/typography": "^0.5.19",
     "next": "16.2.2",
+    "playwright-core": "^1.59.1",
     "prisma": "^7.7.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
