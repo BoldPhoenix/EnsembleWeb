@@ -10,7 +10,7 @@ import { getSessionSnapshot } from "../../lib/snapshot"
 import { getSkillInstructions, getPromotedSkillNames } from "../../lib/skills"
 import { runApo } from "../../lib/apo"
 import {
-  scanForSycophancy, logScan,
+  scanForSycophancy, scanForInterCharacterSycophancy, logScan,
   checkHardConstraints, logConstraints,
   getFilterMode, stripSycophancy,
   detectUserCorrection,
@@ -23,6 +23,11 @@ import {
 } from "../../lib/anti-sycophancy"
 import { checkCorrectionPatterns } from "../../lib/skills"
 
+/** Strip <think>...</think> blocks emitted by extended-thinking models that ignore think:false */
+function stripThinkBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+}
+
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
@@ -31,7 +36,8 @@ const DEFAULT_PROMPT = "You are a helpful assistant. Keep responses brief and co
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, systemPrompt, image, sessionId, personality } = await req.json()
+    const { messages, systemPrompt, image, sessionId, personality, collabCounterpart } = await req.json()
+    const counterpartName: string | undefined = collabCounterpart
     const basePrompt = systemPrompt || DEFAULT_PROMPT
     const characterId = personality || 'aimee'
     const tracer = new Tracer(sessionId)
@@ -132,33 +138,36 @@ export async function POST(req: NextRequest) {
     // Falls back to global chain (OpenRouter > Gemini > Ollama) when no CharacterConfig row exists.
     if (characterConfig) {
       if (characterConfig.provider === 'openrouter' && OPENROUTER_API_KEY) {
-        return handleOpenRouter(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId)
+        return handleOpenRouter(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId, counterpartName)
       }
       if (characterConfig.provider === 'gemini' && GEMINI_API_KEY) {
-        return handleGemini(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId)
+        return handleGemini(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId, counterpartName)
       }
-      if (characterConfig.provider === 'ollama') {
-        return handleOllama(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId)
+      // Ollama requires OLLAMA_URL to be explicitly set. In production (Vercel),
+      // OLLAMA_URL is typically undefined because there's no reachable Ollama
+      // instance. If so, fall through to the global provider chain.
+      if (characterConfig.provider === 'ollama' && process.env.OLLAMA_URL) {
+        return handleOllama(messages, fullPrompt, image, tracer, characterConfig.llmModel ?? undefined, characterId, counterpartName)
       }
-      // CharacterConfig exists but the required API key is missing — log and fall through
-      console.warn(`CharacterConfig for '${characterId}' specifies provider '${characterConfig.provider}' but the required API key/URL is not configured. Falling back to global chain.`)
+      // CharacterConfig exists but the required API key is missing or Ollama is unreachable. Log and fall through to global chain.
+      console.warn(`CharacterConfig for '${characterId}' specifies provider '${characterConfig.provider}' but it's not usable in this environment. Falling back to global chain.`)
     }
 
     // Global fallback chain: OpenRouter > Gemini > Ollama
     if (OPENROUTER_API_KEY) {
-      return handleOpenRouter(messages, fullPrompt, image, tracer, undefined, characterId)
+      return handleOpenRouter(messages, fullPrompt, image, tracer, undefined, characterId, counterpartName)
     }
     if (GEMINI_API_KEY) {
-      return handleGemini(messages, fullPrompt, image, tracer, undefined, characterId)
+      return handleGemini(messages, fullPrompt, image, tracer, undefined, characterId, counterpartName)
     }
-    return handleOllama(messages, fullPrompt, image, tracer, undefined, characterId)
+    return handleOllama(messages, fullPrompt, image, tracer, undefined, characterId, counterpartName)
   } catch (error) {
     console.error("Chat API error:", error)
     return new Response(`Chat error: ${String(error)}`, { status: 500 })
   }
 }
 
-async function handleOpenRouter(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string) {
+async function handleOpenRouter(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string, counterpartName?: string) {
   const model = modelOverride || process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free"
   const mode = getFilterMode()
   const maxAttempts = mode === 'warn' ? 1 : 3
@@ -231,6 +240,15 @@ async function handleOpenRouter(messages: {role: string, content: string}[], sys
     tracer?.fire('sycophancy_detection', { severity: scan.severity, phrases: scan.detections.map(d => d.phrase), provider: 'openrouter', model })
   }
 
+  // Inter-character scan (collab mode only)
+  if (counterpartName && text) {
+    const interScan = scanForInterCharacterSycophancy(text, counterpartName)
+    logScan(interScan, { characterId, sessionId: tracer?.sessionId ?? undefined, provider: 'openrouter', model })
+    if (interScan.flagged) {
+      tracer?.fire('inter_character_sycophancy', { severity: interScan.severity, phrases: interScan.detections.map(d => d.phrase), counterpart: counterpartName, provider: 'openrouter', model })
+    }
+  }
+
   const finalText = (mode === 'strip' && scan.flagged) ? stripSycophancy(text, scan) : text
   const ollamaFormat = JSON.stringify({ message: { content: finalText } }) + "\n"
   return new Response(ollamaFormat, {
@@ -238,14 +256,14 @@ async function handleOpenRouter(messages: {role: string, content: string}[], sys
   })
 }
 
-async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string) {
+async function handleOllama(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string, counterpartName?: string) {
   const model = modelOverride || "gemma4:31b-cloud"
   const mode = getFilterMode()
 
   // Rewrite/strip mode: buffer the full response so we can scan and retry.
   // Warn mode: keep the streaming path so the user sees tokens as they arrive.
   if (mode !== 'warn') {
-    return handleOllamaBuffered(messages, systemPrompt, image, tracer, model, characterId, mode)
+    return handleOllamaBuffered(messages, systemPrompt, image, tracer, model, characterId, mode, counterpartName)
   }
 
   // ── Warn mode: streaming path ─────────────────────────────────────────────
@@ -293,6 +311,14 @@ async function handleOllama(messages: {role: string, content: string}[], systemP
         if (scan.flagged) {
           tracer?.fire('sycophancy_detection', { severity: scan.severity, phrases: scan.detections.map(d => d.phrase), provider: 'ollama', model })
         }
+        // Inter-character scan (collab mode only)
+        if (counterpartName) {
+          const interScan = scanForInterCharacterSycophancy(accumulated, counterpartName)
+          logScan(interScan, { characterId, sessionId: sessionId ?? undefined, provider: 'ollama', model })
+          if (interScan.flagged) {
+            tracer?.fire('inter_character_sycophancy', { severity: interScan.severity, phrases: interScan.detections.map(d => d.phrase), counterpart: counterpartName, provider: 'ollama', model })
+          }
+        }
       }
     },
   })
@@ -324,6 +350,7 @@ async function handleOllamaBuffered(
   model: string,
   characterId: string | undefined,
   mode: 'rewrite' | 'strip',
+  counterpartName?: string,
 ) {
   const maxAttempts = 3
   let currentPrompt = systemPrompt
@@ -349,7 +376,7 @@ async function handleOllamaBuffered(
     }
 
     const data = await response.json()
-    text = data.message?.content || ""
+    text = stripThinkBlocks(data.message?.content || "")
 
     scan = scanForSycophancy(text)
     constraints = checkHardConstraints(text)
@@ -366,12 +393,21 @@ async function handleOllamaBuffered(
     tracer?.fire('sycophancy_detection', { severity: scan.severity, phrases: scan.detections.map(d => d.phrase), provider: 'ollama', model })
   }
 
+  // Inter-character scan (collab mode only)
+  if (counterpartName && text) {
+    const interScan = scanForInterCharacterSycophancy(text, counterpartName)
+    logScan(interScan, { characterId, sessionId: tracer?.sessionId ?? undefined, provider: 'ollama', model })
+    if (interScan.flagged) {
+      tracer?.fire('inter_character_sycophancy', { severity: interScan.severity, phrases: interScan.detections.map(d => d.phrase), counterpart: counterpartName, provider: 'ollama', model })
+    }
+  }
+
   const finalText = (mode === 'strip' && scan.flagged) ? stripSycophancy(text, scan) : text
   const ollamaFormat = JSON.stringify({ message: { content: finalText } }) + "\n"
   return new Response(ollamaFormat, { headers: { "Content-Type": "text/event-stream" } })
 }
 
-async function handleGemini(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string) {
+async function handleGemini(messages: {role: string, content: string}[], systemPrompt: string, image?: string, tracer?: Tracer, modelOverride?: string, characterId?: string, counterpartName?: string) {
   const model = modelOverride || "gemini-2.0-flash"
   const mode = getFilterMode()
   const maxAttempts = mode === 'warn' ? 1 : 3
@@ -427,6 +463,15 @@ async function handleGemini(messages: {role: string, content: string}[], systemP
   // Layer 5: fire span for reward function
   if (scan.flagged) {
     tracer?.fire('sycophancy_detection', { severity: scan.severity, phrases: scan.detections.map(d => d.phrase), provider: 'gemini', model })
+  }
+
+  // Inter-character scan (collab mode only)
+  if (counterpartName && text) {
+    const interScan = scanForInterCharacterSycophancy(text, counterpartName)
+    logScan(interScan, { characterId, sessionId: tracer?.sessionId ?? undefined, provider: 'gemini', model })
+    if (interScan.flagged) {
+      tracer?.fire('inter_character_sycophancy', { severity: interScan.severity, phrases: interScan.detections.map(d => d.phrase), counterpart: counterpartName, provider: 'gemini', model })
+    }
   }
 
   const finalText = (mode === 'strip' && scan.flagged) ? stripSycophancy(text, scan) : text

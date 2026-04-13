@@ -47,8 +47,11 @@ skills-lock.json
 
 # backup files from AI-assisted edits (we have backups elsewhere)
 *.bak
-*.bak2
-*.bak3
+*.bak?
+
+# migration artifacts — never commit zipped node_modules
+node_modules.zip
+*.node_modules.zip
 
 # large source assets — full-res character models, Blender files, etc.
 # These are kept locally but not in the public repo to avoid bloat.
