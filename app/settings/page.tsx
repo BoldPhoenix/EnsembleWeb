@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import Header from "../components/Header"
 import { personalities, defaultPersonality } from "../lib/personalities"
+import { classifyTier, tierWarning } from "../lib/provider-tiers"
 
 interface SkillStat {
   id: string
@@ -27,12 +28,22 @@ interface SkillProposal {
 export default function Settings() {
   const [activePersonality, setActivePersonality] = useState(defaultPersonality)
   const [descriptions, setDescriptions] = useState<Record<string, string>>({})
-  const [activeTab, setActiveTab] = useState<"personality" | "learned" | "grows" | "storage">("personality")
+  const [activeTab, setActiveTab] = useState<"personality" | "learned" | "grows" | "honesty" | "storage">("personality")
   const [skills, setSkills] = useState<SkillStat[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
   const [resetConfirm, setResetConfirm] = useState<string | null>(null)
   const [proposals, setProposals] = useState<SkillProposal[]>([])
   const [proposalsLoading, setProposalsLoading] = useState(false)
+  const [honestyStats, setHonestyStats] = useState<{
+    sessionCount: number
+    detectionCount: number
+    correctionCount: number
+    mentalHealthCount: number
+    feedbackCount: number
+    topPhrases: { phrase: string; count: number }[]
+    correctionSkill: { promoted: boolean; score: number; trials: number } | null
+  } | null>(null)
+  const [honestyLoading, setHonestyLoading] = useState(false)
   const [storageStats, setStorageStats] = useState<Record<string, number> | null>(null)
   const [storageLoading, setStorageLoading] = useState(false)
   const [evictionResult, setEvictionResult] = useState<Record<string, number> | null>(null)
@@ -64,6 +75,9 @@ export default function Settings() {
     }
     if (activeTab === "grows") {
       loadProposals()
+    }
+    if (activeTab === "honesty") {
+      loadHonestyStats()
     }
     if (activeTab === "storage") {
       loadStorageStats()
@@ -157,6 +171,19 @@ export default function Settings() {
     })
     setResetConfirm(null)
     await loadSkills()
+  }
+
+  async function loadHonestyStats() {
+    setHonestyLoading(true)
+    try {
+      const res = await fetch(`/api/honesty?character=${activePersonality}`)
+      const data = await res.json()
+      setHonestyStats(data)
+    } catch {
+      setHonestyStats(null)
+    } finally {
+      setHonestyLoading(false)
+    }
   }
 
   async function loadStorageStats() {
@@ -286,6 +313,16 @@ export default function Settings() {
               How {characterName} Grows
             </button>
             <button
+              onClick={() => setActiveTab("honesty")}
+              className={`px-4 py-2 text-sm font-medium transition ${
+                activeTab === "honesty"
+                  ? "text-white border-b-2 border-blue-500"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              How {characterName} Pushes Back
+            </button>
+            <button
               onClick={() => setActiveTab("storage")}
               className={`px-4 py-2 text-sm font-medium transition ${
                 activeTab === "storage"
@@ -374,6 +411,24 @@ export default function Settings() {
                     {modelSaving ? "Saving…" : modelSaved ? "Saved" : "Save"}
                   </button>
                 </div>
+                {/* Layer 2: Provider sycophancy tier guidance */}
+                {(() => {
+                  const tier = classifyTier(modelProvider, modelName)
+                  const warning = tierWarning(tier)
+                  return (
+                    <div className="mt-3 rounded border border-zinc-700 bg-zinc-800/50 px-3 py-2 text-xs text-zinc-400">
+                      <span className="font-semibold text-zinc-300">Honesty tiers: </span>
+                      <span className="text-emerald-400">Low sycophancy</span> — Claude, DeepSeek-V3, Qwen2.5 &nbsp;·&nbsp;
+                      <span className="text-yellow-400">Moderate</span> — Gemini 2.5 Pro, GPT-4o &nbsp;·&nbsp;
+                      <span className="text-red-400">Higher risk</span> — Llama 3.x family.
+                      {warning && (
+                        <p className={`mt-1 font-medium ${tier.tier === "high" ? "text-red-400" : "text-yellow-400"}`}>
+                          {warning}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
 
               <div>
@@ -497,6 +552,118 @@ export default function Settings() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ── How [Name] Pushes Back tab ── */}
+          {activeTab === "honesty" && (
+            <div className="space-y-6">
+              <p className="text-zinc-400 text-sm">
+                {characterName} uses a layered defense system to stay honest. Here&apos;s what&apos;s
+                active and what&apos;s been detected in your recent conversations.
+              </p>
+
+              {/* Defense layers summary */}
+              <div className="rounded-lg bg-zinc-800 p-5 space-y-3">
+                <h3 className="text-white text-sm font-semibold">Active Defense Layers</h3>
+                <div className="space-y-2 text-xs text-zinc-400">
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">System prompt</span> — every response includes explicit anti-sycophancy directives</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">Output filter</span> — responses are scanned for flattering phrases before delivery</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">Adversarial context</span> — when you make a claim, {characterName} retrieves contradicting information too</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">Hard constraints</span> — long responses must contain at least one counter-consideration</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">Adaptive reward</span> — sycophancy detections penalize {characterName}&apos;s behavioral score over time</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-emerald-400 mt-0.5">✓</span>
+                    <span><span className="text-zinc-300">Mental health guardrails</span> — {characterName} redirects to professional resources if needed, not therapeutic intervention</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Stats from recent sessions */}
+              {honestyLoading ? (
+                <p className="text-zinc-500 text-sm">Loading...</p>
+              ) : honestyStats ? (
+                <div className="space-y-4">
+                  <h3 className="text-white text-sm font-semibold">
+                    Last {honestyStats.sessionCount} Sessions
+                  </h3>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="rounded-lg bg-zinc-800 px-4 py-3 text-center">
+                      <div className={`text-2xl font-bold ${honestyStats.detectionCount > 0 ? "text-yellow-400" : "text-emerald-400"}`}>
+                        {honestyStats.detectionCount}
+                      </div>
+                      <div className="text-zinc-500 text-xs mt-0.5">Too agreeable</div>
+                    </div>
+                    <div className="rounded-lg bg-zinc-800 px-4 py-3 text-center">
+                      <div className={`text-2xl font-bold ${honestyStats.correctionCount > 0 ? "text-orange-400" : "text-emerald-400"}`}>
+                        {honestyStats.correctionCount}
+                      </div>
+                      <div className="text-zinc-500 text-xs mt-0.5">You corrected {characterName}</div>
+                    </div>
+                    <div className="rounded-lg bg-zinc-800 px-4 py-3 text-center">
+                      <div className={`text-2xl font-bold ${honestyStats.feedbackCount > 0 ? "text-yellow-400" : "text-emerald-400"}`}>
+                        {honestyStats.feedbackCount}
+                      </div>
+                      <div className="text-zinc-500 text-xs mt-0.5">You called it out</div>
+                    </div>
+                    <div className="rounded-lg bg-zinc-800 px-4 py-3 text-center">
+                      <div className="text-2xl font-bold text-zinc-300">
+                        {honestyStats.mentalHealthCount}
+                      </div>
+                      <div className="text-zinc-500 text-xs mt-0.5">Safety redirects</div>
+                    </div>
+                  </div>
+
+                  {honestyStats.topPhrases.length > 0 && (
+                    <div className="rounded-lg bg-zinc-800 p-4">
+                      <h4 className="text-zinc-400 text-xs uppercase tracking-wide mb-2">Caught saying</h4>
+                      <div className="space-y-1">
+                        {honestyStats.topPhrases.map(({ phrase, count }) => (
+                          <div key={phrase} className="flex justify-between text-xs">
+                            <span className="text-zinc-300 font-mono">&ldquo;{phrase}&rdquo;</span>
+                            <span className="text-zinc-500">{count}×</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {honestyStats.correctionSkill && (
+                    <div className="rounded-lg border border-emerald-800 bg-zinc-800 p-4">
+                      <h4 className="text-emerald-400 text-xs uppercase tracking-wide mb-1">Correction skill active</h4>
+                      <p className="text-zinc-400 text-xs">
+                        {characterName} has generated a behavioral guideline for handling pushback directly.
+                        {honestyStats.correctionSkill.promoted
+                          ? " It is promoted and active in all conversations."
+                          : ` In trial (${honestyStats.correctionSkill.trials} trials, score ${honestyStats.correctionSkill.score}%).`}
+                      </p>
+                    </div>
+                  )}
+
+                  {honestyStats.detectionCount === 0 && honestyStats.correctionCount === 0 && (
+                    <p className="text-zinc-500 text-sm">
+                      No issues detected in recent conversations. The system is working.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-zinc-500 text-sm">Could not load honesty stats.</p>
+              )}
             </div>
           )}
 

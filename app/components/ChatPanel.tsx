@@ -23,7 +23,7 @@ function sanitizeForTTS(text: string): string {
 }
 
     export default function ChatPanel() {
-    const [messages, setMessages] = useState<{role: string, content: string, personality?: string}[]>([])
+    const [messages, setMessages] = useState<{role: string, content: string, personality?: string, id?: string}[]>([])
     const [sessionId, setSessionId] = useState<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [personality, setPersonality] = useState(defaultPersonality)
@@ -48,7 +48,7 @@ function sanitizeForTTS(text: string): string {
           if (res.ok) {
             const msgs = await res.json()
             if (msgs.length > 0) {
-              setMessages(msgs.map((m: any) => ({ role: m.role, content: m.content, personality: m.personality })))
+              setMessages(msgs.map((m: any) => ({ role: m.role, content: m.content, personality: m.personality, id: m.id })))
               setSessionId(savedId)
               return
             }
@@ -287,6 +287,11 @@ function sanitizeForTTS(text: string): string {
         body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
       }).then(r => r.json())
 
+      // Attach the DB id to the message in state (for feedback buttons)
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1 && m.role === "assistant" ? { ...m, id: savedMsg.id } : m
+      ))
+
       // Extract topics in background — don't block UI
       fetch("/api/memory", {
         method: "POST",
@@ -436,6 +441,10 @@ function sanitizeForTTS(text: string): string {
         body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
       }).then(r => r.json())
 
+      setMessages(prev => prev.map((m, i) =>
+        i === prev.length - 1 && m.role === "assistant" ? { ...m, id: savedMsg.id } : m
+      ))
+
       // Extract topics
       fetch("/api/memory", {
         method: "POST",
@@ -455,7 +464,7 @@ function sanitizeForTTS(text: string): string {
       <div className="flex flex-col flex-1 p-4 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-y-auto space-y-2">
           {messages.map((msg, i) => (
-            <MessageBubble key={i} role={msg.role} content={msg.content} />
+            <MessageBubble key={i} role={msg.role} content={msg.content} messageId={msg.id} sessionId={sessionId} />
           ))}
           <div ref={messagesEndRef} />
         </div>

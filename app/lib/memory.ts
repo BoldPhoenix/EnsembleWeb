@@ -161,13 +161,34 @@ export async function getAllTopicsSummary(characterId?: string): Promise<string>
 }
 
 /**
- * Look up specific topics by terms mentioned in the current message.
+ * Detect whether a user message makes a claim or assertion.
+ * Assertive messages benefit from adversarial context retrieval (Layer 4) — the model
+ * receives both supporting topics and adjacent-category topics that may contain
+ * competing information, preventing it from simply echoing the user's position.
  */
-export async function lookupTopics(terms: string[]): Promise<string> {
+export function isAssertiveMessage(text: string): boolean {
+  const lower = text.toLowerCase()
+  const patterns = [
+    /\bi think\b/, /\bi believe\b/, /\bi feel\b/, /\bi know\b/,
+    /\bshould\b/, /\bmust\b/, /\balways\b/, /\bnever\b/,
+    /\bis the best\b/, /\bis the worst\b/, /\bwould be better\b/,
+    /\bis wrong\b/, /\bis right\b/, /\bis stupid\b/, /\bis great\b/,
+    /\bfact is\b/, /\bthe truth is\b/, /\bobviously\b/, /\bclearly\b/,
+    /\beveryone knows\b/, /\bit's obvious\b/, /\bit is obvious\b/,
+  ]
+  return patterns.some(p => p.test(lower))
+}
+
+/**
+ * Look up specific topics by terms mentioned in the current message.
+ * Uses 'both' mode for assertive messages (Layer 4: adversarial context).
+ */
+export async function lookupTopics(terms: string[], userMessage?: string): Promise<string> {
   if (terms.length === 0) return ""
 
   const store = getMemoryStore()
-  const topics = await store.findTopicsByKeywords(terms)
+  const mode = (userMessage && isAssertiveMessage(userMessage)) ? 'both' : 'supporting'
+  const topics = await store.findTopicsByKeywords(terms, mode)
 
   if (topics.length === 0) return ""
 
@@ -175,7 +196,10 @@ export async function lookupTopics(terms: string[]): Promise<string> {
     return `- ${t.label} [${t.category}]: ${t.summary.slice(0, 500)}`
   })
 
-  return `What you know about these topics (from your memory):\n${lines.join("\n")}`
+  const header = mode === 'both'
+    ? `What you know about these topics (including adjacent context for balance):`
+    : `What you know about these topics (from your memory):`
+  return `${header}\n${lines.join("\n")}`
 }
 
 /**
@@ -207,7 +231,7 @@ export async function buildMemoryContext(userMessage: string, characterId?: stri
 
   const [topicsSummary, relevantTopics, sessionSummaries] = await Promise.all([
     getAllTopicsSummary(characterId),
-    lookupTopics(terms),
+    lookupTopics(terms, userMessage),
     getSessionSummaries(),
   ])
 

@@ -43,7 +43,16 @@ export interface MemoryStore {
 
   findTopicByName(name: string): Promise<Topic | null>
 
-  findTopicsByKeywords(keywords: string[]): Promise<Topic[]>
+  /**
+   * Find topics matching the given keywords.
+   *
+   * mode:
+   *   supporting   — return topics whose name matches a keyword (default)
+   *   contradicting — return topics in the same categories that do NOT match the keywords
+   *                   (adjacent context forces the model to reconcile competing information)
+   *   both         — equal mix of supporting and contradicting results
+   */
+  findTopicsByKeywords(keywords: string[], mode?: 'supporting' | 'contradicting' | 'both'): Promise<Topic[]>
 
   findTopicsByCharacter(characterId: string, limit: number): Promise<Topic[]>
 
