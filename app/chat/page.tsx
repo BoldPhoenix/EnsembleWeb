@@ -4,10 +4,12 @@ import { useState, useEffect } from "react"
 import Header from "../components/Header"
 import ChatPanel from "../components/ChatPanel"
 import Avatar from "../components/Avatar"
+import CollaborationPanel from "../components/CollaborationPanel"
 import { personalities, defaultPersonality } from "../lib/personalities"
 
 export default function Chat() {
   const [personality, setPersonality] = useState(defaultPersonality)
+  const [collabMode, setCollabMode] = useState(false)
 
   useEffect(() => {
     const saved = localStorage.getItem("ensemble-personality")
@@ -29,15 +31,24 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-screen bg-zinc-900">
-      <Header />
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        <div className="w-full h-64 md:w-1/3 md:h-auto">
-          <Avatar modelPath={p.model} />
+      <Header
+        collabMode={collabMode}
+        onCollabToggle={() => setCollabMode(prev => !prev)}
+      />
+      {collabMode ? (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <CollaborationPanel />
         </div>
-        <div className="flex flex-col w-full md:w-2/3">
-          <ChatPanel />
+      ) : (
+        <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+          <div className="w-full h-64 md:w-1/3 md:h-auto">
+            <Avatar modelPath={p.model} />
+          </div>
+          <div className="flex flex-col w-full md:w-2/3">
+            <ChatPanel />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

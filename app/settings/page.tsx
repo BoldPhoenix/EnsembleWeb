@@ -53,6 +53,7 @@ export default function Settings() {
   const [modelSaving, setModelSaving] = useState(false)
   const [modelSaved, setModelSaved] = useState(false)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
+  const [collabRounds, setCollabRounds] = useState(3)
 
   useEffect(() => {
     const saved = localStorage.getItem("ensemble-personality")
@@ -67,6 +68,9 @@ export default function Settings() {
       if (desc) savedDescs[id] = desc
     }
     setDescriptions(savedDescs)
+
+    const savedRounds = parseInt(localStorage.getItem("ensemble-collab-rounds") || "3", 10)
+    setCollabRounds(isNaN(savedRounds) ? 3 : Math.max(1, Math.min(99, savedRounds)))
   }, [])
 
   useEffect(() => {
@@ -276,6 +280,32 @@ export default function Settings() {
                 </div>
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Collaboration Settings */}
+        <div className="w-full max-w-2xl bg-zinc-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-white mb-1">Collaboration Mode</h2>
+          <p className="text-sm text-zinc-400 mb-4">
+            How many rounds Aimee and Arthur exchange before stopping. Enable Collab in the chat header to use this mode.
+          </p>
+          <div className="flex items-center gap-4">
+            <label className="text-sm text-zinc-300 whitespace-nowrap">Rounds (1–99)</label>
+            <input
+              type="number"
+              min={1}
+              max={99}
+              value={collabRounds}
+              onChange={e => {
+                const val = Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1))
+                setCollabRounds(val)
+                localStorage.setItem("ensemble-collab-rounds", String(val))
+              }}
+              className="w-20 rounded bg-zinc-700 px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <span className="text-xs text-zinc-500">
+              {collabRounds === 1 ? "1 exchange" : `${collabRounds} rounds (${collabRounds * 2} total responses)`}
+            </span>
           </div>
         </div>
 

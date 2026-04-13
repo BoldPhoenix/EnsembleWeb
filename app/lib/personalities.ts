@@ -67,4 +67,32 @@ export function buildSystemPrompt(personalityId: string, userDescription?: strin
   return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${TOOL_INSTRUCTIONS}`
 }
 
+export function buildCollabSystemPrompt(
+  personalityId: string,
+  userDescription?: string,
+  round?: number,
+  maxRounds?: number
+): string {
+  const p = personalities[personalityId]
+  if (!p) return ""
+  const description = userDescription || p.defaultDescription
+  const counterpart = personalityId === "aimee" ? "Arthur" : "Aimee"
+  const isFirst = personalityId === "aimee"
+  const roundNote = round !== undefined && maxRounds !== undefined
+    ? ` You are on round ${round} of ${maxRounds}.`
+    : ""
+  const collabSuffix = `
+
+## Collaboration Mode
+
+You are in a live collaboration session with ${counterpart}.${roundNote} ${
+    isFirst
+      ? `You respond first in each round. Build on the conversation so far.`
+      : `${counterpart} has already responded — their message is above yours in the context. Read it before replying. Build on it, agree where you agree, push back where you don't.`
+  } Address your counterpart by name when relevant. Keep responses focused — this is a back-and-forth, not a monologue.`
+
+  // No TOOL_INSTRUCTIONS in collab mode — tool calls in a live back-and-forth create chaos.
+  return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${collabSuffix}`
+}
+
 export const defaultPersonality = "aimee"
