@@ -18,8 +18,6 @@ const CONVERGENCE_PHRASES = [
 function isConvergence(text: string): boolean {
   const t = text.trim().toLowerCase()
   if (!t) return false
-  // Very short non-question response — "agreed." "fair enough." etc.
-  if (t.length < 60 && !t.includes("?")) return true
   return CONVERGENCE_PHRASES.some(p => t.includes(p))
 }
 
