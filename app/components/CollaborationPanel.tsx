@@ -4,6 +4,25 @@ import { useState, useEffect, useRef } from "react"
 import MessageBubble from "./MessageBubble"
 import { personalities, buildCollabSystemPrompt } from "../lib/personalities"
 
+const INTERRUPT_PREFIX = "[interrupt] "
+
+// Convergence detection — if the last response signals agreement/termination,
+// skip the next turn entirely rather than paying for an "agreed, nothing to add" call.
+// Two triggers: (1) response under 60 chars with no question, (2) explicit convergence phrases.
+const CONVERGENCE_PHRASES = [
+  "nothing to add", "nothing more to add", "nothing further",
+  "i have nothing more", "agree completely", "fully agree",
+  "couldn't agree more", "said it better", "nailed it",
+]
+
+function isConvergence(text: string): boolean {
+  const t = text.trim().toLowerCase()
+  if (!t) return false
+  // Very short non-question response — "agreed." "fair enough." etc.
+  if (t.length < 60 && !t.includes("?")) return true
+  return CONVERGENCE_PHRASES.some(p => t.includes(p))
+}
+
 interface CollabMessage {
   role: "user" | "assistant"
   content: string
@@ -41,12 +60,16 @@ export default function CollaborationPanel() {
         if (res.ok) {
           const msgs = await res.json()
           if (msgs.length > 0) {
-            const mapped: CollabMessage[] = msgs.map((m: any) => ({
-              role: m.role as "user" | "assistant",
-              content: m.content,
-              personality: m.personality,
-              id: m.id,
-            }))
+            const mapped: CollabMessage[] = msgs.map((m: any) => {
+              const isInterrupt = m.role === "user" && m.content?.startsWith(INTERRUPT_PREFIX)
+              return {
+                role: m.role as "user" | "assistant",
+                content: isInterrupt ? m.content.slice(INTERRUPT_PREFIX.length) : m.content,
+                personality: m.personality,
+                id: m.id,
+                isInterrupt,
+              }
+            })
             messagesRef.current = mapped
             setMessages(mapped)
             setSessionId(savedId)
@@ -189,8 +212,9 @@ export default function CollaborationPanel() {
       for (const personalityId of order) {
         if (!runningRef.current) break
 
+        let response = ""
         try {
-          await streamTurn(personalityId, round, totalRounds)
+          response = await streamTurn(personalityId, round, totalRounds)
         } catch (e: any) {
           if (e.name === "AbortError") {
             runningRef.current = false
@@ -199,6 +223,13 @@ export default function CollaborationPanel() {
         }
 
         if (!runningRef.current) break
+
+        // Early termination — if the character signaled convergence, stop the loop
+        // before paying for the next turn's "agreed, nothing to add" call.
+        if (response && isConvergence(response)) {
+          runningRef.current = false
+          break
+        }
 
         // Check for queued user injection at turn boundary
         const queued = queuedRef.current
@@ -210,7 +241,8 @@ export default function CollaborationPanel() {
           await fetch(`/api/sessions/${sid}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role: "user", content: queued, personality: "user" }),
+            // Prefix with sentinel so interrupt styling survives session reload
+            body: JSON.stringify({ role: "user", content: `${INTERRUPT_PREFIX}${queued}`, personality: "user" }),
           })
 
           // Reset round counter — user injected new context, restart from round 1
@@ -262,6 +294,12 @@ export default function CollaborationPanel() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <span
+            className="text-xs text-zinc-500 border border-zinc-700 px-2 py-0.5 rounded"
+            title="Voice playback is paused in Collab mode — the back-and-forth is too fast to follow by ear."
+          >
+            Voice off
+          </span>
           {isRunning && currentRound > 0 && (
             <span className="text-xs text-zinc-400">
               Round {currentRound} of {maxRounds}
