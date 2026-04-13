@@ -12,6 +12,9 @@ export default function Chat() {
   const [collabMode, setCollabMode] = useState(false)
 
   useEffect(() => {
+    const savedCollab = localStorage.getItem("ensemble-collab-mode")
+    if (savedCollab === "true") setCollabMode(true)
+
     const saved = localStorage.getItem("ensemble-personality")
     if (saved && personalities[saved]) {
       setPersonality(saved)
@@ -33,7 +36,11 @@ export default function Chat() {
     <div className="flex flex-col h-screen bg-zinc-900">
       <Header
         collabMode={collabMode}
-        onCollabToggle={() => setCollabMode(prev => !prev)}
+        onCollabToggle={() => setCollabMode(prev => {
+          const next = !prev
+          localStorage.setItem("ensemble-collab-mode", String(next))
+          return next
+        })}
       />
       {collabMode ? (
         <div className="flex flex-col flex-1 overflow-hidden">
