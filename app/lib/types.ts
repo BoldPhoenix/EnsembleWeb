@@ -43,6 +43,7 @@ export type SpanKind =
   | 'skill_fire'
   | 'apo_score'
   | 'sycophancy_detection'
+  | 'inter_character_sycophancy'
   | 'user_correction'
   | 'mental_health_flag'
   | 'user_feedback'

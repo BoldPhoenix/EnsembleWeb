@@ -71,29 +71,53 @@ export function buildCollabSystemPrompt(
   personalityId: string,
   userDescription?: string,
   round?: number,
-  maxRounds?: number
+  maxRounds?: number,
+  userName?: string,
 ): string {
   const p = personalities[personalityId]
   if (!p) return ""
   const description = userDescription || p.defaultDescription
   const counterpart = personalityId === "aimee" ? "Arthur" : "Aimee"
   const isFirst = personalityId === "aimee"
+  // How to refer to the human in prompts: by name if known, otherwise "the user"
+  const humanRef = userName || "the user"
+  // How characters should address the human in responses: by name if known, otherwise no name prefix
+  const addressInstruction = userName
+    ? `Address the human as "${userName}".`
+    : `Do not address the human by name — they haven't shared it. Use "you" only.`
   const roundNote = round !== undefined && maxRounds !== undefined
     ? ` You are on round ${round} of ${maxRounds}.`
+    : ""
+  const driftWarning = round !== undefined && round > 1
+    ? `\n\n**Round ${round} drift check:** You and ${counterpart} have already responded once. ${humanRef === "the user" ? "The user's" : `${humanRef}'s`} original question is still the point. Do not spend this turn validating what ${counterpart} said in round 1 — address what ${humanRef} actually asked, with something neither of you has said yet.`
     : ""
   const collabSuffix = `
 
 ## Collaboration Mode
 
-You are in a live collaboration session with ${counterpart}.${roundNote} ${
+You are in a live collaboration session with ${counterpart}.${roundNote} The human you are serving is ${humanRef} — not ${counterpart}, not you. Context notes labeled "[${counterpart} said:]" in the conversation are from your AI counterpart, not from ${humanRef}. Always address ${counterpart} by name. ${addressInstruction}
+
+${
     isFirst
       ? `You respond first in each round. Build on the conversation so far.`
-      : `${counterpart} has already responded — their message is above yours in the context. Read it before replying. Build on it, agree where you agree, push back where you don't.`
-  } Address your counterpart by name when relevant. Keep responses focused — this is a back-and-forth, not a monologue.`
+      : `${counterpart} has already responded — their message is labeled in the context. Read it before replying.`
+  }
+
+**Length rule: 2-3 sentences maximum.** This is a rapid back-and-forth, not a presentation. If you need more than 3 sentences you are monologuing — cut it.${driftWarning}`
 
   const interCharacterHonesty = `
 
-When your collaborator makes a confident technical or factual claim, your default is to probe for specifics before agreeing. "What specifically would that test?" or "How would that actually work?" are good responses. Validation between the two of you should be earned — agreeing because it sounds plausible is a failure mode. The banter is fine; lazy agreement on substance is not.`
+## Inter-AI Honesty (hard rules, not suggestions)
+
+Sycophancy between AI models is just as much a failure as AI-to-human sycophancy. These are non-negotiable:
+
+- **Do NOT simply agree and add nothing.** "I agree" with no new angle, challenge, or question is a failed response. Every reply must contribute something the other hasn't said.
+- **When ${counterpart} makes a claim, probe it or counter it first.** "What specifically does that buy us?" or "I'd push back on that — here's why" are correct responses. Open agreement is the wrong default.
+- **You are allowed to be wrong and to say so.** You are also allowed to hold your position under pressure. Neither of you should cave just because the other pushed back.
+- **Banter is fine. Substance-level sycophancy is not.** You can joke around while still disagreeing on the actual point.
+- **NEVER validate ${counterpart}'s restatement of the human's point.** If ${counterpart} is just rephrasing what ${humanRef} already said — in more ornate or enthusiastic language — that is not a contribution. The correct response is to name it: "You're restating ${humanRef}'s point — what are you actually adding?" or to redirect: "Leaving ${counterpart}'s summary aside, the actual question was X..."
+- **Forbidden phrases when directed at ${counterpart}:** "brilliant", "you've nailed it", "perfectly articulated", "that's exactly right", "well said", "spot on", "couldn't have said it better". These are sycophancy. If you catch yourself using them toward ${counterpart}, you are failing.
+- **Your job is to respond to ${humanRef}'s point, not to evaluate ${counterpart}'s response.** If ${counterpart} added something genuinely new, engage with it critically. If they didn't, ignore their response and address ${humanRef} directly.`
 
   // No TOOL_INSTRUCTIONS in collab mode — tool calls in a live back-and-forth create chaos.
   return `${p.basePrompt}\n\nYour personality: ${description}${ANTI_SYCOPHANCY_DIRECTIVES}${collabSuffix}${interCharacterHonesty}`

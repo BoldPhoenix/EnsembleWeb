@@ -6,13 +6,24 @@ import { personalities, buildCollabSystemPrompt } from "../lib/personalities"
 
 const INTERRUPT_PREFIX = "[interrupt] "
 
+/** Strip <think>...</think> blocks — some models emit these even with think:false */
+function stripThinkBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+}
+
+/** Strip stage directions — parenthetical action/emotion notes emitted by smaller models
+ *  despite the "no stage directions" instruction in the system prompt. */
+function stripStageDirections(text: string): string {
+  // Remove leading parenthetical blocks: "(A measured, thoughtful response...)\n\n"
+  return text.replace(/^\s*\([^)]{0,200}\)\s*\n*/g, "").trim()
+}
+
 // Convergence detection — if the last response signals agreement/termination,
 // skip the next turn entirely rather than paying for an "agreed, nothing to add" call.
 // Two triggers: (1) response under 60 chars with no question, (2) explicit convergence phrases.
 const CONVERGENCE_PHRASES = [
   "nothing to add", "nothing more to add", "nothing further",
-  "i have nothing more", "agree completely", "fully agree",
-  "couldn't agree more", "said it better", "nailed it",
+  "i have nothing more",
 ]
 
 function isConvergence(text: string): boolean {
@@ -35,6 +46,7 @@ export default function CollaborationPanel() {
   const sessionIdRef = useRef<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [currentRound, setCurrentRound] = useState(0)
+  const [thinkingPersonality, setThinkingPersonality] = useState<string | null>(null)
   const [maxRounds, setMaxRounds] = useState(3)
   const [input, setInput] = useState("")
   const abortRef = useRef<AbortController | null>(null)
@@ -45,7 +57,7 @@ export default function CollaborationPanel() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+  }, [messages, thinkingPersonality])
 
   useEffect(() => {
     async function init() {
@@ -119,7 +131,8 @@ export default function CollaborationPanel() {
       personalityId,
       localStorage.getItem(`ensemble-desc-${personalityId}`) || undefined,
       round,
-      totalRounds
+      totalRounds,
+      localStorage.getItem("ensemble-user-name") || undefined,
     )
 
     // Build API messages — last 20, convert other-personality assistant turns to context notes
@@ -127,19 +140,39 @@ export default function CollaborationPanel() {
     const apiMessages = recent.map(m => {
       if (m.role === "assistant" && m.personality && m.personality !== personalityId) {
         const otherName = personalities[m.personality]?.name || m.personality
-        return { role: "user" as const, content: `(Context: ${otherName} said: "${m.content}")` }
+        return { role: "user" as const, content: `[${otherName} said: "${m.content}"] — this is from your AI counterpart, not from Carl.` }
       }
       return { role: m.role as "user" | "assistant", content: m.content }
     })
 
+    const counterpart = personalityId === "aimee" ? "arthur" : "aimee"
+
+    // Inject identity context into the last user message — lands in the high-attention zone
+    // right next to the actual question, not buried in the system prompt under memory blocks.
+    const storedUserName = localStorage.getItem("ensemble-user-name") || ""
+    const humanLabel = storedUserName || "the user"
+    const lastUserIdx = apiMessages.reduce((acc: number, m: {role: string}, i: number) => m.role === "user" ? i : acc, -1)
+    if (lastUserIdx !== -1) {
+      const charName = personalities[personalityId]?.name ?? personalityId
+      const counterpartPName = personalities[counterpart]?.name ?? counterpart
+      const identityPrefix = `[You are ${charName}. Human: ${humanLabel}. Counterpart AI: ${counterpartPName}.] `
+      apiMessages[lastUserIdx] = {
+        ...apiMessages[lastUserIdx],
+        content: identityPrefix + apiMessages[lastUserIdx].content,
+      }
+    }
+
     abortRef.current = new AbortController()
+    setThinkingPersonality(personalityId)
 
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: apiMessages, systemPrompt, sessionId: sid, personality: personalityId }),
+      body: JSON.stringify({ messages: apiMessages, systemPrompt, sessionId: sid, personality: personalityId, collabCounterpart: counterpart }),
       signal: abortRef.current.signal,
     })
+
+    setThinkingPersonality(null)
 
     if (!response.body) return ""
 
@@ -163,22 +196,33 @@ export default function CollaborationPanel() {
           const data = JSON.parse(line)
           if (data.message?.content) {
             aiMessage += data.message.content
-            updateLastAssistantMessage(aiMessage, personalityId)
+            updateLastAssistantMessage(stripStageDirections(stripThinkBlocks(aiMessage)), personalityId)
           }
         } catch {}
       }
     }
+    // Flush any content left in buffer (final chunk may lack trailing newline)
+    if (buffer.trim()) {
+      try {
+        const data = JSON.parse(buffer.trim())
+        if (data.message?.content) {
+          aiMessage += data.message.content
+          updateLastAssistantMessage(stripThinkBlocks(aiMessage), personalityId)
+        }
+      } catch {}
+    }
 
-    if (aiMessage) {
+    const cleanMessage = stripStageDirections(stripThinkBlocks(aiMessage))
+    if (cleanMessage) {
       const saved = await fetch(`/api/sessions/${sid}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", content: aiMessage, personality: personalityId }),
+        body: JSON.stringify({ role: "assistant", content: cleanMessage, personality: personalityId }),
       }).then(r => r.json())
       if (saved?.id) patchLastMessageId(personalityId, saved.id)
     }
 
-    return aiMessage
+    return cleanMessage
   }
 
   async function runCollaboration(userMessage: string) {
@@ -344,6 +388,22 @@ export default function CollaborationPanel() {
               />
             </div>
           )
+        )}
+        {thinkingPersonality && (
+          <div>
+            <div className={`text-xs mb-1 ml-1 font-medium ${thinkingPersonality === "aimee" ? "text-purple-400" : "text-blue-400"}`}>
+              {personalities[thinkingPersonality]?.name ?? thinkingPersonality}
+            </div>
+            <div className="flex justify-start">
+              <div className="rounded p-3 bg-zinc-700">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              </div>
+            </div>
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>

@@ -47,7 +47,13 @@ export default function MessageBubble({ role, content, personality, messageId, s
   return (
     <div className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}>
       <div className={`group rounded p-3 max-w-2xl prose prose-invert prose-sm ${role === "user" ? "bg-blue-600 text-white" : "bg-zinc-700 text-cyan-200"}`}>
-        {role === "user" ? content : (
+        {role === "user" ? content : content === "" ? (
+          <span className="inline-flex items-center gap-1 py-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+          </span>
+        ) : (
           <ReactMarkdown
             components={{
               pre: ({ children }) => <>{children}</>,

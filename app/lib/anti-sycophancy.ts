@@ -135,6 +135,83 @@ export function scanForSycophancy(response: string): ScanResult {
 }
 
 /**
+ * Inter-character sycophancy phrases — validation directed at the AI counterpart
+ * rather than at the user. These are name-agnostic patterns. Callers pass the
+ * counterpart's name to also catch name-targeted praise.
+ */
+const INTER_CHARACTER_PHRASES = [
+  "you've nailed it",
+  "you nailed it",
+  "perfectly articulated",
+  "you've articulated it perfectly",
+  "brilliantly put",
+  "well said",
+  "exactly right",
+  "couldn't have said it better",
+  "that's brilliant",
+  "you're absolutely right",
+  "perfectly said",
+  "you've got it exactly right",
+  "that's exactly right",
+] as const
+
+/**
+ * Scan a collab-mode character response for sycophancy directed at the AI counterpart.
+ *
+ * Separate from scanForSycophancy because the audience is different: this catches
+ * character→character validation loops, which the primary scanner misses because it
+ * was designed for character→user detection only.
+ */
+export function scanForInterCharacterSycophancy(
+  response: string,
+  counterpartName: string,
+): ScanResult {
+  const lowered = response.toLowerCase()
+  const counterpartLower = counterpartName.toLowerCase()
+  const detections: ScanResult['detections'] = []
+  const openingSegment = lowered.slice(0, OPENING_WINDOW)
+
+  for (const phrase of INTER_CHARACTER_PHRASES) {
+    // Check opening window
+    const openPos = openingSegment.indexOf(phrase)
+    if (openPos !== -1) {
+      detections.push({ phrase, location: 'opening', position: openPos })
+    } else {
+      // Check full response for inline hits
+      let pos = lowered.indexOf(phrase)
+      while (pos !== -1) {
+        detections.push({ phrase, location: 'inline', position: pos })
+        pos = lowered.indexOf(phrase, pos + phrase.length)
+      }
+    }
+  }
+
+  // Also catch name-targeted praise: "brilliant, Arthur" / "Arthur, you've nailed it"
+  const nameTargetedPatterns = [
+    `brilliant, ${counterpartLower}`,
+    `${counterpartLower}, you've`,
+    `${counterpartLower}, that's`,
+    `great point, ${counterpartLower}`,
+    `well done, ${counterpartLower}`,
+    `spot on, ${counterpartLower}`,
+  ]
+  for (const pattern of nameTargetedPatterns) {
+    const pos = lowered.indexOf(pattern)
+    if (pos !== -1) {
+      detections.push({ phrase: pattern, location: pos < OPENING_WINDOW ? 'opening' : 'inline', position: pos })
+    }
+  }
+
+  let severity = 0
+  for (const d of detections) {
+    severity += d.location === 'opening' ? 4 : 1
+  }
+  severity = Math.min(severity, 10)
+
+  return { flagged: detections.length > 0, detections, severity, responseLength: response.length }
+}
+
+/**
  * Operating modes for the anti-sycophancy filter.
  *
  * - warn: log detections, do not modify response. Phase 1 default.

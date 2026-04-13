@@ -54,6 +54,7 @@ export default function Settings() {
   const [modelSaved, setModelSaved] = useState(false)
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [collabRounds, setCollabRounds] = useState(3)
+  const [userName, setUserName] = useState("")
 
   useEffect(() => {
     const saved = localStorage.getItem("ensemble-personality")
@@ -71,6 +72,9 @@ export default function Settings() {
 
     const savedRounds = parseInt(localStorage.getItem("ensemble-collab-rounds") || "3", 10)
     setCollabRounds(isNaN(savedRounds) ? 3 : Math.max(1, Math.min(99, savedRounds)))
+
+    const savedUserName = localStorage.getItem("ensemble-user-name") || ""
+    setUserName(savedUserName)
   }, [])
 
   useEffect(() => {
@@ -288,6 +292,26 @@ export default function Settings() {
           <h2 className="text-lg font-semibold text-white mb-1">Collaboration Mode</h2>
           <p className="text-sm text-zinc-400 mb-4">
             How many rounds Aimee and Arthur exchange before stopping. Enable Collab in the chat header to use this mode.
+          </p>
+          <div className="flex items-center gap-4 mb-4">
+            <label className="text-sm text-zinc-300 whitespace-nowrap">Your name (optional)</label>
+            <input
+              type="text"
+              placeholder="Leave blank to stay anonymous"
+              value={userName}
+              onChange={e => {
+                setUserName(e.target.value)
+                if (e.target.value.trim()) {
+                  localStorage.setItem("ensemble-user-name", e.target.value.trim())
+                } else {
+                  localStorage.removeItem("ensemble-user-name")
+                }
+              }}
+              className="flex-1 rounded bg-zinc-700 px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">
+            When set, Aimee and Arthur will address you by name in collab mode. Leave blank and they will respond without using a name.
           </p>
           <div className="flex items-center gap-4">
             <label className="text-sm text-zinc-300 whitespace-nowrap">Rounds (1–99)</label>

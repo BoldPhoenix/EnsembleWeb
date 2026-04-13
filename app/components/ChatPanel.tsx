@@ -6,6 +6,11 @@ import ChatInput from "./ChatInput"
 import { audioState } from "../lib/audioState"
 import { personalities, defaultPersonality, buildSystemPrompt } from "../lib/personalities"
 
+/** Strip <think>...</think> blocks — some models emit these even with think:false */
+function stripThinkBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+}
+
 // Strip stage directions, action descriptions, and markdown so TTS doesn't read them.
 // Order matters: remove bracketed/asterisked CONTENT before generic char filters.
 function sanitizeForTTS(text: string): string {
@@ -181,11 +186,11 @@ function sanitizeForTTS(text: string): string {
             const data = JSON.parse(line)
             if (data.message?.content) {
               aiMessage += data.message.content
-              setMessages([...updated, { role: "assistant", content: aiMessage }])
+              setMessages([...updated, { role: "assistant", content: stripThinkBlocks(aiMessage) }])
 
               // Sentence detection runs on the tool-call-stripped text only.
               // This avoids URL fragments inside tool calls being sent to TTS.
-              const speakable = stripToolCalls(aiMessage)
+              const speakable = stripToolCalls(stripThinkBlocks(aiMessage))
               const unspoken = speakable.slice(spokenText.length)
               const sentenceMatch = unspoken.match(/[^.!?]*[.!?]\s*/g)
               if (sentenceMatch) {
@@ -200,6 +205,13 @@ function sanitizeForTTS(text: string): string {
             // incomplete JSON, skip
           }
         }
+      }
+      // Flush any content left in buffer (final chunk may lack trailing newline)
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer.trim())
+          if (data.message?.content) aiMessage += data.message.content
+        } catch {}
       }
 
       // Add any remaining text (tool calls already stripped)
@@ -280,11 +292,12 @@ function sanitizeForTTS(text: string): string {
         }
       }
 
+      const cleanAiMessage = stripThinkBlocks(aiMessage)
       // Save to DB immediately
       const savedMsg = await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
+        body: JSON.stringify({ role: "assistant", content: cleanAiMessage, personality: currentPersonality }),
       }).then(r => r.json())
 
       // Attach the DB id to the message in state (for feedback buttons)
@@ -298,7 +311,7 @@ function sanitizeForTTS(text: string): string {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userMessage: message,
-          assistantMessage: aiMessage,
+          assistantMessage: cleanAiMessage,
           messageId: savedMsg.id,
           personality: currentPersonality,
         }),
@@ -428,17 +441,25 @@ function sanitizeForTTS(text: string): string {
             const data = JSON.parse(line)
             if (data.message?.content) {
               aiMessage += data.message.content
-              setMessages([...updated, { role: "assistant", content: aiMessage }])
+              setMessages([...updated, { role: "assistant", content: stripThinkBlocks(aiMessage) }])
             }
           } catch {}
         }
       }
+      // Flush any content left in buffer (final chunk may lack trailing newline)
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer.trim())
+          if (data.message?.content) aiMessage += data.message.content
+        } catch {}
+      }
 
+      const cleanAiMessage = stripThinkBlocks(aiMessage)
       // Save assistant response
       const savedMsg = await fetch(`/api/sessions/${sessionId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", content: aiMessage, personality: currentPersonality }),
+        body: JSON.stringify({ role: "assistant", content: cleanAiMessage, personality: currentPersonality }),
       }).then(r => r.json())
 
       setMessages(prev => prev.map((m, i) =>
@@ -449,7 +470,7 @@ function sanitizeForTTS(text: string): string {
       fetch("/api/memory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userMessage: message, assistantMessage: aiMessage, messageId: savedMsg.id, personality: currentPersonality }),
+        body: JSON.stringify({ userMessage: message, assistantMessage: cleanAiMessage, messageId: savedMsg.id, personality: currentPersonality }),
       }).catch(() => {})
 
     } catch (error) {
@@ -466,13 +487,19 @@ function sanitizeForTTS(text: string): string {
           {messages.map((msg, i) => (
             <MessageBubble key={i} role={msg.role} content={msg.content} messageId={msg.id} sessionId={sessionId} />
           ))}
+          {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role !== "assistant") && (
+            <div className="flex justify-start">
+              <div className="rounded p-3 bg-zinc-700">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
-        {isLoading && (
-          <div className="text-zinc-400 text-sm animate-pulse">
-          Thinking...
-          </div>
-        )}
         <ChatInput onSend={handleSend} onSendImage={handleSendImage} />
       </div>
     )
